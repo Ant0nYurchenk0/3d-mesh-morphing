@@ -1,0 +1,170 @@
+# ============================================================
+# Image-to-3D Evaluation Pipeline — Configuration
+# ============================================================
+# Adding a new shape or model only requires editing this file.
+# No code changes needed.
+#
+# Mesh sources (tried in order):
+#   1. thingi10k package (if download_strategy: auto or package_only)
+#   2. Thingi10K HTTP download by thingiverse_id (if download_strategy: auto or http_only)
+#   3. Trimesh procedural primitive (if use_primitive_fallback: true — the default)
+#
+# Thingi10K IDs: the dataset contains a specific set of 10K Thingiverse thing-IDs.
+# Not every Thingiverse ID is in the dataset, so HTTP download may return 404.
+# To find valid IDs:
+#   - Browse https://ten-thousand-models.appspot.com/ and note working IDs
+#   - Or use: uv sync --extra dataset && uv run python -c "
+#       import thingi10k; entries = list(thingi10k.dataset(query='gear'))
+#       print([(e['file_id'], e.get('tags','')) for e in entries[:5]])"
+# Set the found IDs below. If no valid ID is known, the primitive fallback is used.
+# ============================================================
+
+shapes:
+  gear:
+    thingiverse_id: null          # Replace with a valid Thingi10K ID, e.g. 3635
+    search_query: "spur gear"
+    file_ext: stl
+    primitive_type: gear          # procedural fallback: 10-tooth spur gear
+    primitive_params:
+      n_teeth: 10
+      outer_radius: 1.0
+      inner_radius: 0.72
+      height: 0.4
+
+  star:
+    thingiverse_id: null          # Replace with a valid Thingi10K ID
+    search_query: "star shape"
+    file_ext: stl
+    primitive_type: star          # procedural fallback: 5-pointed star
+    primitive_params:
+      n_points: 5
+      outer_radius: 1.0
+      inner_radius: 0.4
+      height: 0.3
+
+  sphere:
+    thingiverse_id: null          # Replace with a valid Thingi10K ID
+    search_query: "sphere solid"
+    file_ext: stl
+    primitive_type: sphere        # procedural fallback: subdivided icosphere
+
+  torus:
+    thingiverse_id: null          # Replace with a valid Thingi10K ID
+    search_query: "torus donut"
+    file_ext: stl
+    primitive_type: torus         # procedural fallback: trimesh torus
+
+# ============================================================
+# Models — all called via HuggingFace Spaces (gradio_client)
+# ============================================================
+
+models:
+  trellis:
+    # Community fork of microsoft/TRELLIS-image-large — exposes /start_session
+    # to work around the session-directory bug in the original microsoft/TRELLIS.
+    space_id: "trellis-community/TRELLIS"
+    api_name: "/generate_and_extract_glb"   # combined generate+extract endpoint
+    output_format: glb
+    seed: 42
+    ss_guidance_strength: 7.5
+    ss_sampling_steps: 12
+    slat_guidance_strength: 3.0
+    slat_sampling_steps: 12
+    mesh_simplify: 0.95     # 0.9–0.98
+    texture_size: 1024      # 512–2048
+
+  trellis2:
+    space_id: "microsoft/TRELLIS.2"
+    api_name: "/image_to_3d"      # step 1 of 2; step 2 is /extract_glb (same session)
+    output_format: glb
+    seed: 42
+    resolution: "1024"            # "512" | "1024" | "1536"
+    # Structured latent diffusion params (TRELLIS.2-specific)
+    ss_guidance_strength: 7.5
+    ss_guidance_rescale: 0.7
+    ss_sampling_steps: 12
+    ss_rescale_t: 5.0
+    shape_slat_guidance_strength: 7.5
+    shape_slat_guidance_rescale: 0.5
+    shape_slat_sampling_steps: 12
+    shape_slat_rescale_t: 3.0
+    tex_slat_guidance_strength: 1.0
+    tex_slat_guidance_rescale: 0.0
+    tex_slat_sampling_steps: 12
+    tex_slat_rescale_t: 3.0
+    decimation_target: 300000     # /extract_glb param (face count, 100k–500k)
+    texture_size: 2048            # /extract_glb param (1024–4096)
+
+  hunyuan3d:
+    space_id: "tencent/Hunyuan3D-2"
+    api_name: "/shape_generation"   # verified; NOT /generate
+    output_format: glb
+    steps: 30
+    guidance_scale: 5.0
+    seed: 1234
+    octree_resolution: 256
+    num_chunks: 8000
+
+
+# ============================================================
+# Rendering
+# ============================================================
+
+render:
+  width: 1024
+  height: 1024
+  elev_deg: 20          # Camera elevation angle (degrees)
+  azim_deg: 30          # Camera azimuth angle (degrees)
+  fill_fraction: 0.65   # Target fraction of frame filled by object
+  fill_tolerance: 0.05  # ±tolerance around fill_fraction
+  fill_search_iters: 8  # Binary search iterations for distance
+  bg_color: [1.0, 1.0, 1.0]            # White background (RGB, 0-1)
+  # Three-point lighting intensities
+  key_light_intensity: 3.0
+  fill_light_intensity: 1.5
+  back_light_intensity: 1.0
+
+# ============================================================
+# Metrics
+# ============================================================
+
+metrics:
+  n_sample_points: 10000   # Points sampled from each mesh surface
+  fscore_tau: 0.02         # F-Score threshold (2% of unit sphere)
+  # Volume IoU voxel pitch = bounding_box_diagonal × voxel_pitch_fraction
+  voxel_pitch_fraction: 0.015625   # 1/64
+
+  # Reference thresholds for reporting/coloring in summary table
+  thresholds:
+    chamfer_distance:
+      excellent: 0.005
+      good: 0.01
+      poor: 0.03
+    f_score:
+      excellent: 0.90
+      good: 0.85
+      poor: 0.70
+    morphing_readiness_score:
+      excellent: 0.80
+      good: 0.65
+      poor: 0.40
+
+# ============================================================
+# Pipeline execution
+# ============================================================
+
+pipeline:
+  api_delay_seconds: 2.0   # Sleep between successive model API calls
+  max_retries: 1           # Retry failed calls once before recording error
+  session_dir: "sessions"  # Relative to pipeline/ root
+
+  # Download strategy (tried in order when not "primitive_only"):
+  #   "auto"           — try thingi10k package, then HTTP, then primitive fallback
+  #   "http_only"      — HTTP by thingiverse_id, then primitive fallback
+  #   "package_only"   — thingi10k package only (requires: uv sync --extra dataset)
+  #   "primitive_only" — always use trimesh procedural primitives (offline, no downloads)
+  download_strategy: "http_only"
+
+  # Automatically fall back to trimesh primitives when download fails (e.g. 404 IDs).
+  # Set to false to hard-fail instead of silently using a synthetic mesh.
+  use_primitive_fallback: true

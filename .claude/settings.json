@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(while ! grep -q summary_per_model /private/tmp/claude-502/-Users-ayurc-Documents-Prog-Python-3d-mesh-morphing/8c6ac737-7396-4c55-bbf4-4fca785f0b0b/tasks/b98qp3swl.output)"
+    ]
+  }
+}

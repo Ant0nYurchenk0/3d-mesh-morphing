@@ -1,0 +1,46 @@
+[project]
+name = "image-to-3d-eval"
+version = "0.1.0"
+description = "Benchmark pipeline for image-to-3D reconstruction models"
+requires-python = "==3.12.*"
+dependencies = [
+    "trimesh[easy]>=4.4.0,<5.0",
+    "scipy>=1.13,<2.0",
+    "numpy>=1.26,<2.0",
+    "matplotlib>=3.9",
+    "gradio-client>=1.3.0",
+    "requests>=2.32",
+    "pyyaml>=6.0.3",
+    "pillow>=10.0",
+    "python-dotenv>=1.0",
+    "tqdm>=4.66",
+    "huggingface-hub>=0.23",
+]
+
+[project.optional-dependencies]
+# pyrender + OSMesa: used in Docker (Linux). Install with: uv sync --extra render
+render = [
+    "pyrender>=0.1.45",
+    # pyrender 0.1.45 pins PyOpenGL==3.1.0; do not constrain further
+    "PyOpenGL>=3.1.0",
+]
+# Poisson surface reconstruction for SPAR3D point-cloud output conversion
+poisson = [
+    "open3d>=0.18",
+]
+# DINOv2 perceptual similarity metric (facebook/dinov2-base via transformers)
+dino = [
+    "torch>=2.0",
+    "transformers>=4.35",
+]
+# Thingi10K Python package for semantic search (heavy deps: polars, lagrange-open)
+dataset = [
+    "thingi10k>=1.4.0",
+]
+
+[tool.setuptools]
+py-modules = ["run_pipeline"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

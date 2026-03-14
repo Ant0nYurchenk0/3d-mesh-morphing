@@ -1,0 +1,51 @@
+# ============================================================
+# Image-to-3D Evaluation Pipeline — Docker Compose
+# ============================================================
+#
+# Prerequisites:
+#   1. Copy .env.example → .env and set HF_TOKEN
+#   2. docker compose build
+#
+# Usage examples:
+#   # Full matrix (5 shapes × 5 models)
+#   docker compose run pipeline
+#
+#   # Subset
+#   docker compose run pipeline --shapes gear,sphere --models trellis,hunyuan3d
+#
+#   # Dry run (download + render only, no model API calls)
+#   docker compose run pipeline --dry-run --shapes gear
+#
+#   # List available shapes/models
+#   docker compose run pipeline --list
+#
+# Sessions are bind-mounted so artifacts appear on the host at ./sessions/
+# ============================================================
+
+services:
+  pipeline:
+    build:
+      # Build context is the repo root so COPY pipeline/ works correctly
+      context: ..
+      dockerfile: pipeline/Dockerfile
+
+    environment:
+      # HuggingFace token — loaded from .env file (never commit .env)
+      - HF_TOKEN=${HF_TOKEN}
+      # OSMesa renderer (redundant with Dockerfile ENV, but explicit here too)
+      - PYOPENGL_PLATFORM=osmesa
+      # Configurable API delay between calls (override default from config.yaml)
+      - API_DELAY_SECONDS=${API_DELAY_SECONDS:-2.0}
+      # Uncomment to force matplotlib renderer for debugging
+      # - FORCE_MATPLOTLIB=1
+
+    volumes:
+      # Session artifacts persist on the host outside the container
+      - ./sessions:/app/pipeline/sessions
+      # Mesh download cache persists between runs
+      - ./cache:/app/pipeline/cache
+
+    # Default: run full matrix. Override at runtime with CLI args.
+    command: >
+      --shapes gear,star,torus,sphere,cloud
+      --models trellis,trellis2,hunyuan3d,triposg,spar3d
