@@ -5,6 +5,10 @@ Usage:
     from src.models import get_model_client
     client = get_model_client("trellis", model_cfg)
     glb_path = client.reconstruct(render_png_path)
+
+Implemented models: trellis, trellis2, hunyuan3d.
+To add a new model: create src/models/<name>.py inheriting ImageTo3DClient,
+then add it to _REGISTRY below.
 """
 
 from __future__ import annotations
@@ -15,25 +19,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+from .base import ImageTo3DClient
+from .hunyuan3d import Hunyuan3DClient
 from .trellis import TRELLISClient
 from .trellis2 import TRELLIS2Client
-from .hunyuan3d import Hunyuan3DClient
-from .triposr import TripoSRClient
-from .instantmesh import InstantMeshClient
-from .triposg import TripoSGClient
-from .spar3d import SPAR3DClient
-from .shap_e import ShapEClient
-from .base import ImageTo3DClient
 
 _REGISTRY: dict[str, type[ImageTo3DClient]] = {
     "trellis": TRELLISClient,
     "trellis2": TRELLIS2Client,
     "hunyuan3d": Hunyuan3DClient,
-    "triposr": TripoSRClient,
-    "instantmesh": InstantMeshClient,
-    "triposg": TripoSGClient,
-    "spar3d": SPAR3DClient,
-    "shap_e": ShapEClient,
 }
 
 
@@ -59,9 +53,4 @@ __all__ = [
     "TRELLISClient",
     "TRELLIS2Client",
     "Hunyuan3DClient",
-    "TripoSRClient",
-    "InstantMeshClient",
-    "TripoSGClient",
-    "SPAR3DClient",
-    "ShapEClient",
 ]

@@ -28,6 +28,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .config import BenchmarkConfig
 from .session import Session
 
 log = logging.getLogger(__name__)
@@ -54,11 +55,8 @@ def null_metrics(error_msg: str) -> dict:
 
 
 class Reporter:
-    def __init__(self, cfg: Any) -> None:
-        self.cfg = cfg
-        # Load thresholds for annotation
-        mc = _get(cfg, "metrics", {})
-        self._thresholds = _get(mc, "thresholds", {})
+    def __init__(self, cfg: BenchmarkConfig) -> None:
+        self._thresholds = cfg.metrics.thresholds.as_dict()
 
     def write(self, session: Session, results: dict[tuple[str, str], dict]) -> None:
         """
@@ -269,7 +267,3 @@ def _fmt(v: Any, digits: int = 5, na_str: str = "N/A") -> str:
         return na_str
 
 
-def _get(obj: Any, key: str, default: Any) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)

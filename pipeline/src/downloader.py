@@ -3,17 +3,12 @@ Mesh downloader / generator with three strategies (tried in order):
 
   Strategy A ("package"):   thingi10k Python package — semantic search by query.
                             Requires: uv sync --extra dataset
-                            Heavy deps: polars, lagrange-open, datasets.
 
   Strategy B ("http"):      Direct HTTP download from ten-thousand-models.appspot.com
-                            by Thingiverse ID. Fails with 404 if the ID is not in
-                            the Thingi10K dataset — set thingiverse_id: null in
-                            config.yaml to skip this step cleanly.
+                            by Thingiverse ID.
 
-  Strategy C ("primitive"): Trimesh procedural mesh. Always works. Shapes:
-                            gear, star, sphere, torus, cloud.
-                            Activated automatically when A+B fail if
-                            pipeline.use_primitive_fallback: true (default).
+  Strategy C ("primitive"): Trimesh procedural mesh. Always works offline.
+                            Shapes: gear, star, sphere, torus, cloud.
 
 config.yaml controls:
   pipeline.download_strategy:      "auto" | "http_only" | "package_only" | "primitive_only"
@@ -21,23 +16,23 @@ config.yaml controls:
   shapes.<name>.primitive_type:    gear | star | sphere | torus | cloud
   shapes.<name>.primitive_params:  {<kwargs>}
 
-After obtaining a mesh (any strategy), it is:
-  1. Loaded as trimesh.Trimesh (force="mesh")
-  2. Normalised to unit bounding sphere, centred at origin
-  3. Cached in pipeline/cache/{shape_name}/ to avoid re-downloading
+All acquired meshes are normalised to unit bounding sphere and cached in
+pipeline/cache/{shape_name}/ to avoid re-downloading.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import requests
 import trimesh
+
+from .config import BenchmarkConfig
+from .mesh_utils import normalise_mesh
 
 log = logging.getLogger(__name__)
 
@@ -46,11 +41,10 @@ _CACHE_ROOT = Path(__file__).parent.parent / "cache"
 
 
 class Downloader:
-    def __init__(self, cfg: Any) -> None:
-        self.cfg = cfg
-        pipe_cfg = cfg.get("pipeline", {})
-        self.strategy: str = pipe_cfg.get("download_strategy", "http_only")
-        self.use_primitive_fallback: bool = pipe_cfg.get("use_primitive_fallback", True)
+    def __init__(self, cfg: BenchmarkConfig) -> None:
+        self._cfg = cfg
+        self.strategy: str = cfg.pipeline.download_strategy
+        self.use_primitive_fallback: bool = cfg.pipeline.use_primitive_fallback
 
     def download(self, shape_name: str, shape_cfg: dict) -> Path:
         """
@@ -64,7 +58,6 @@ class Downloader:
 
         log.info("[downloader] acquiring %s (strategy=%s)", shape_name, self.strategy)
 
-        # --- primitive_only: skip all downloads ---
         if self.strategy == "primitive_only":
             return self._primitive_and_cache(shape_name, shape_cfg)
 
@@ -86,7 +79,7 @@ class Downloader:
             tid = shape_cfg.get("thingiverse_id")
             if tid is None:
                 log.info(
-                    "[downloader] thingiverse_id is null for '%s' - skipping HTTP download",
+                    "[downloader] thingiverse_id is null for '%s' — skipping HTTP download",
                     shape_name,
                 )
             else:
@@ -103,8 +96,7 @@ class Downloader:
         if raw_path is None:
             if self.use_primitive_fallback:
                 log.info(
-                    "[downloader] using primitive fallback for '%s' "
-                    "(no valid Thingi10K ID or download failed)",
+                    "[downloader] using primitive fallback for '%s'",
                     shape_name,
                 )
                 return self._primitive_and_cache(shape_name, shape_cfg)
@@ -120,7 +112,7 @@ class Downloader:
         return normalised
 
     # ------------------------------------------------------------------
-    # Strategy A -- thingi10k package
+    # Strategy A — thingi10k package
     # ------------------------------------------------------------------
 
     def _download_package(self, shape_name: str, shape_cfg: dict) -> Path:
@@ -148,7 +140,7 @@ class Downloader:
         return tmp_path
 
     # ------------------------------------------------------------------
-    # Strategy B -- direct HTTP download
+    # Strategy B — direct HTTP download
     # ------------------------------------------------------------------
 
     def _download_http(self, shape_name: str, shape_cfg: dict) -> Path:
@@ -171,7 +163,7 @@ class Downloader:
         return tmp_path
 
     # ------------------------------------------------------------------
-    # Strategy C -- trimesh primitive
+    # Strategy C — trimesh primitive
     # ------------------------------------------------------------------
 
     def _primitive_and_cache(self, shape_name: str, shape_cfg: dict) -> Path:
@@ -180,7 +172,7 @@ class Downloader:
         log.info("[downloader/primitive] generating '%s' (type=%s)", shape_name, primitive_type)
 
         mesh = _make_primitive(primitive_type, params)
-        mesh = _normalise_mesh(mesh)
+        mesh = normalise_mesh(mesh)
 
         cache_dir = _CACHE_ROOT / shape_name
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -190,13 +182,14 @@ class Downloader:
         return out_path
 
     # ------------------------------------------------------------------
-    # Mesh normalisation & caching
+    # Normalisation & caching
     # ------------------------------------------------------------------
 
     def _normalise_and_cache(self, shape_name: str, raw_path: Path) -> Path:
         log.info("[downloader] normalising mesh from %s", raw_path)
-        mesh = _load_as_single_mesh(raw_path)
-        mesh = _normalise_mesh(mesh)
+        from .mesh_utils import load_mesh
+        mesh = load_mesh(raw_path)
+        mesh = normalise_mesh(mesh)
 
         cache_dir = _CACHE_ROOT / shape_name
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -218,7 +211,6 @@ class Downloader:
 # ------------------------------------------------------------------
 
 def _make_primitive(primitive_type: str, params: dict) -> trimesh.Trimesh:
-    """Create a trimesh primitive by type name."""
     makers = {
         "sphere": _make_sphere,
         "torus": _make_torus,
@@ -236,24 +228,18 @@ def _make_primitive(primitive_type: str, params: dict) -> trimesh.Trimesh:
 
 
 def _make_sphere(params: dict) -> trimesh.Trimesh:
-    """Subdivided icosphere -- clean, watertight, genus-0."""
-    subdivisions = params.get("subdivisions", 3)
-    return trimesh.creation.icosphere(subdivisions=subdivisions)
+    return trimesh.creation.icosphere(subdivisions=params.get("subdivisions", 3))
 
 
 def _make_torus(params: dict) -> trimesh.Trimesh:
-    """Standard torus (donut)."""
-    major = params.get("major_radius", 1.0)
-    minor = params.get("minor_radius", 0.35)
-    return trimesh.creation.torus(major_radius=major, minor_radius=minor)
+    return trimesh.creation.torus(
+        major_radius=params.get("major_radius", 1.0),
+        minor_radius=params.get("minor_radius", 0.35),
+    )
 
 
 def _make_gear(params: dict) -> trimesh.Trimesh:
-    """
-    10-tooth spur gear created by extruding a 2D gear polygon.
-    Watertight, genus-0, clearly recognisable as a gear from any angle.
-    """
-    from shapely.geometry import Polygon  # bundled with trimesh[easy]
+    from shapely.geometry import Polygon
 
     n_teeth = params.get("n_teeth", 10)
     outer_r = params.get("outer_radius", 1.0)
@@ -267,15 +253,10 @@ def _make_gear(params: dict) -> trimesh.Trimesh:
     pts[0::2] = np.column_stack([outer_r * np.cos(angles_outer), outer_r * np.sin(angles_outer)])
     pts[1::2] = np.column_stack([inner_r * np.cos(angles_inner), inner_r * np.sin(angles_inner)])
 
-    poly = Polygon(pts)
-    return trimesh.creation.extrude_polygon(poly, height)
+    return trimesh.creation.extrude_polygon(Polygon(pts), height)
 
 
 def _make_star(params: dict) -> trimesh.Trimesh:
-    """
-    5-pointed star extruded into a 3D solid.
-    Watertight and clearly star-shaped from the top-down view models prefer.
-    """
     from shapely.geometry import Polygon
 
     n_points = params.get("n_points", 5)
@@ -283,29 +264,17 @@ def _make_star(params: dict) -> trimesh.Trimesh:
     inner_r = params.get("inner_radius", 0.4)
     height = params.get("height", 0.3)
 
-    # Start at top (-pi/2) so the star points straight up
-    angles_outer = np.linspace(
-        -np.pi / 2,
-        -np.pi / 2 + 2 * np.pi,
-        n_points,
-        endpoint=False,
-    )
+    angles_outer = np.linspace(-np.pi / 2, -np.pi / 2 + 2 * np.pi, n_points, endpoint=False)
     angles_inner = angles_outer + np.pi / n_points
 
     pts = np.empty((2 * n_points, 2))
     pts[0::2] = np.column_stack([outer_r * np.cos(angles_outer), outer_r * np.sin(angles_outer)])
     pts[1::2] = np.column_stack([inner_r * np.cos(angles_inner), inner_r * np.sin(angles_inner)])
 
-    poly = Polygon(pts)
-    return trimesh.creation.extrude_polygon(poly, height)
+    return trimesh.creation.extrude_polygon(Polygon(pts), height)
 
 
 def _make_cloud(params: dict) -> trimesh.Trimesh:
-    """
-    Cloud shape: icosphere with radial sinusoidal noise on vertex positions.
-    Creates a recognisably bumpy / organic silhouette without multi-body union.
-    Watertight and genus-0.
-    """
     noise_scale = params.get("noise_scale", 0.18)
     subdivisions = params.get("subdivisions", 4)
 
@@ -315,7 +284,6 @@ def _make_cloud(params: dict) -> trimesh.Trimesh:
     rng = np.random.default_rng(42)
     directions = v / np.linalg.norm(v, axis=1, keepdims=True)
 
-    # Multi-frequency noise for a more cloud-like silhouette
     noise = np.zeros(len(v))
     for freq in [2.0, 4.0, 8.0]:
         noise += rng.uniform(-1, 1, len(v)) / freq
@@ -326,46 +294,10 @@ def _make_cloud(params: dict) -> trimesh.Trimesh:
 
 
 # ------------------------------------------------------------------
-# Mesh loading / normalisation utilities
+# HTTP utilities
 # ------------------------------------------------------------------
 
-def _load_as_single_mesh(path: Path) -> trimesh.Trimesh:
-    """Load a mesh file as a Trimesh, concatenating all geometries in a Scene."""
-    loaded = trimesh.load(str(path), force="mesh", process=False)
-
-    if isinstance(loaded, trimesh.Scene):
-        meshes = [
-            g for g in loaded.geometry.values()
-            if isinstance(g, trimesh.Trimesh) and len(g.faces) > 0
-        ]
-        if not meshes:
-            raise ValueError(f"No mesh geometry found in {path}")
-        loaded = trimesh.util.concatenate(meshes)
-
-    if not isinstance(loaded, trimesh.Trimesh):
-        raise ValueError(f"Could not load a Trimesh from {path} (got {type(loaded)})")
-
-    if len(loaded.faces) == 0:
-        raise ValueError(f"Mesh from {path} has no faces")
-
-    return loaded
-
-
-def _normalise_mesh(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """
-    Centre at centroid + scale to unit bounding sphere.
-    Mirrors the normalisation in Smooth Shape Blends/run.py lines 203-206.
-    """
-    v = mesh.vertices.copy().astype(np.float64)
-    v -= v.mean(axis=0)
-    max_norm = np.linalg.norm(v, axis=1).max()
-    if max_norm > 1e-9:
-        v /= max_norm
-    return trimesh.Trimesh(vertices=v, faces=mesh.faces.copy(), process=False)
-
-
 def _ext_from_response(resp: requests.Response) -> str | None:
-    """Extract file extension from Content-Disposition header."""
     cd = resp.headers.get("Content-Disposition", "")
     m = re.search(r'filename=["\']?([^"\';\s]+)', cd)
     if m:

@@ -23,7 +23,7 @@
 # ============================================================
 
 services:
-  pipeline:
+  benchmark_pipeline:
     build:
       # Build context is the repo root so COPY pipeline/ works correctly
       context: ..

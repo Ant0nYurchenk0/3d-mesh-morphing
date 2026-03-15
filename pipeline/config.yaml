@@ -113,7 +113,7 @@ models:
 render:
   width: 1024
   height: 1024
-  elev_deg: 20          # Camera elevation angle (degrees)
+  elev_deg: 40          # Camera elevation angle (degrees)
   azim_deg: 30          # Camera azimuth angle (degrees)
   fill_fraction: 0.65   # Target fraction of frame filled by object
   fill_tolerance: 0.05  # ±tolerance around fill_fraction
