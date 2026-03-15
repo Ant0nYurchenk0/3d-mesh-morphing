@@ -41,6 +41,11 @@ import os
 import sys
 from pathlib import Path
 
+# Allow importing from shared/ (sibling directory at the repo root)
+_REPO_ROOT = Path(__file__).parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from dotenv import load_dotenv
 
 logging.basicConfig(

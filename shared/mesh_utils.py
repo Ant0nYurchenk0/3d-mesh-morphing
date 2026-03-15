@@ -1,8 +1,8 @@
 """
 Shared mesh loading and normalisation utilities.
 
-Used by Downloader (pre-processing) and MetricsCalculator (before metrics computation)
-to avoid duplication between the two modules.
+Used by benchmark_pipeline (Downloader, MetricsCalculator) and morphing_pipeline
+(render_mesh_node, target_mesh_node) to avoid duplication.
 """
 
 from __future__ import annotations

@@ -1,0 +1,65 @@
+# ============================================================
+# 3D Mesh Morphing Pipeline — Docker Compose
+# ============================================================
+#
+# Prerequisites:
+#   1. Copy .env.example → .env and set HF_TOKEN and OPENAI_API_KEY
+#   2. docker compose build
+#
+# Usage examples:
+#
+#   # Image input (runs through node 1 → 2 → 4 → 5 → 6 → 7)
+#   docker compose run morphing \
+#     --input-image /data/photo.png \
+#     --prompt-file /data/prompt.txt \
+#     --model trellis
+#
+#   # Mesh input (runs through node 3 → 4 → 5 → 6 → 7)
+#   docker compose run morphing \
+#     --input-mesh /data/object.glb \
+#     --prompt-file /data/prompt.txt
+#
+#   # Skip GPT identity copy (node 1)
+#   docker compose run morphing \
+#     --input-image /data/photo.png \
+#     --prompt-file /data/prompt.txt \
+#     --skip-enhance
+#
+#   # Skip base mesh generation (node 2)
+#   docker compose run morphing \
+#     --input-image /data/photo.png \
+#     --prompt-file /data/prompt.txt \
+#     --skip-base-mesh
+#
+#   # List available models
+#   docker compose run morphing --list
+#
+# Sessions are bind-mounted so artifacts appear on the host at ./sessions/
+# Input files are mounted from ./data/ → /data/ inside the container
+# ============================================================
+
+services:
+  morphing:
+    build:
+      # Build context is the repo root so COPY morphing_pipeline/ and COPY shared/ work
+      context: ..
+      dockerfile: morphing_pipeline/Dockerfile
+
+    environment:
+      # HuggingFace token — for image-to-3D model API calls (nodes 2 and 5)
+      - HF_TOKEN=${HF_TOKEN}
+      # OpenAI API key — for GPT image generation (nodes 1 and 4)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # OSMesa renderer (redundant with Dockerfile ENV, but explicit here too)
+      - PYOPENGL_PLATFORM=osmesa
+      # Uncomment to force matplotlib renderer for debugging
+      # - FORCE_MATPLOTLIB=1
+
+    volumes:
+      # Session artifacts persist on the host
+      - ./sessions:/app/morphing_pipeline/sessions
+      # Mount a local data directory for input images/meshes and prompt files
+      - ./data:/data:ro
+
+    # Override at runtime with actual --input-image / --input-mesh arguments
+    command: ["--help"]

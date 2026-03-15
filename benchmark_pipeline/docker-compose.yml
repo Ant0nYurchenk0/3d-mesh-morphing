@@ -27,7 +27,7 @@ services:
     build:
       # Build context is the repo root so COPY pipeline/ works correctly
       context: ..
-      dockerfile: pipeline/Dockerfile
+      dockerfile: benchmark_pipeline/Dockerfile
 
     environment:
       # HuggingFace token — loaded from .env file (never commit .env)
@@ -41,9 +41,9 @@ services:
 
     volumes:
       # Session artifacts persist on the host outside the container
-      - ./sessions:/app/pipeline/sessions
+      - ./sessions:/app/benchmark_pipeline/sessions
       # Mesh download cache persists between runs
-      - ./cache:/app/pipeline/cache
+      - ./cache:/app/benchmark_pipeline/cache
 
     # Default: run full matrix. Override at runtime with CLI args.
     command: >

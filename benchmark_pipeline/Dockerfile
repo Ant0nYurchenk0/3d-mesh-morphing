@@ -54,26 +54,31 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # ── Working directory ────────────────────────────────────────
-WORKDIR /app/pipeline
+WORKDIR /app/benchmark_pipeline
 
 # ── Dependency layer (cached unless pyproject.toml changes) ──
-# Copy manifests first so Docker can cache this layer
-COPY pipeline/pyproject.toml ./
-# uv.lock may not exist on first build; the wildcard handles that
-COPY pipeline/uv.lock* ./
+# uv.lock is NOT committed (see .gitignore). uv lock resolves it fresh here;
+# the resulting lock is baked into the image layer so the image is self-contained.
+# To regenerate locally:  cd benchmark_pipeline && uv lock
+COPY benchmark_pipeline/pyproject.toml ./
 
-# Install core deps + render optional (pyrender + PyOpenGL)
-# --no-dev skips dev/test deps if any are added later
-RUN uv sync --extra render --no-dev 2>&1
+# Resolve + lock deps, then install (render = pyrender/PyOpenGL, dino = torch+transformers)
+# torch on ARM64 Linux is CPU-only (no CUDA), so the wheel is ~300 MB not ~2 GB.
+RUN uv lock && uv sync --extra render --extra dino --no-dev 2>&1
 
 # ── Source code ──────────────────────────────────────────────
-COPY pipeline/ .
+COPY benchmark_pipeline/ .
+# shared/ utilities used by both pipelines
+COPY shared/ /app/shared/
+
+# Make shared/ importable as a top-level package
+ENV PYTHONPATH=/app
 
 # Create output directories (will be bind-mounted in compose)
 RUN mkdir -p sessions cache
 
 # ── Entry point ──────────────────────────────────────────────
-ENTRYPOINT ["uv", "run", "python", "run_pipeline.py"]
+ENTRYPOINT ["/app/benchmark_pipeline/.venv/bin/python", "run_pipeline.py"]
 
 # Default command — runs full matrix (overridden in compose or on CLI)
 CMD []

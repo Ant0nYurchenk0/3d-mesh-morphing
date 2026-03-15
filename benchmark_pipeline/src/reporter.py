@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import BenchmarkConfig
-from .session import Session
+from shared.session import Session
 
 log = logging.getLogger(__name__)
 

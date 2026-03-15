@@ -1,0 +1,1 @@
+Make the gear have smoothed out edges

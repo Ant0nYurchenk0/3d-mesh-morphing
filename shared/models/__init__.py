@@ -2,12 +2,12 @@
 Model client factory.
 
 Usage:
-    from src.models import get_model_client
+    from shared.models import get_model_client
     client = get_model_client("trellis", model_cfg)
     glb_path = client.reconstruct(render_png_path)
 
 Implemented models: trellis, trellis2, hunyuan3d.
-To add a new model: create src/models/<name>.py inheriting ImageTo3DClient,
+To add a new model: create shared/models/<name>.py inheriting ImageTo3DClient,
 then add it to _REGISTRY below.
 """
 

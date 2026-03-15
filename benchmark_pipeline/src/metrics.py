@@ -24,7 +24,6 @@ Public API:
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +31,8 @@ import trimesh
 from scipy.spatial import KDTree
 
 from .config import MetricsConfig
-from .mesh_utils import load_mesh, normalise_mesh
+from shared.mesh_utils import load_mesh, normalise_mesh
+from shared.mesh_quality import cleanup_cost  # noqa: F401 — re-exported; defined in shared
 
 log = logging.getLogger(__name__)
 
@@ -310,7 +310,7 @@ def dino_similarity(
         log.debug("[metrics/dino] torch or transformers not available — skipping")
         return None
 
-    from .renderer import render_mesh_multiview
+    from shared.renderer import render_mesh_multiview
 
     azimuths = [i * (360.0 / n_views) for i in range(n_views)]
 
@@ -350,60 +350,7 @@ def dino_similarity(
     return float(np.mean(sims)) if sims else None
 
 
-def cleanup_cost(mesh_pred: trimesh.Trimesh) -> int:
-    """
-    Count of morphing-blocking issues in *mesh_pred*. Range [0, 7].
-
-    Issues checked (each contributes 1):
-      1. Multiple connected components
-      2. Not watertight
-      3. Non-manifold edges (shared by >2 faces)
-      4. Zero-area faces (area < 1e-10)
-      5. Interior vertices (distance to centroid < 0.3 × mean distance)
-      6. Euler number ≠ 2
-      7. Too many vertices (>15 000)
-    """
-    cost = 0
-
-    try:
-        if len(mesh_pred.split(only_watertight=False)) > 1:
-            cost += 1
-    except Exception:
-        pass
-
-    if not mesh_pred.is_watertight:
-        cost += 1
-
-    try:
-        edge_counts = Counter(map(tuple, np.sort(mesh_pred.edges, axis=1).tolist()))
-        if any(c > 2 for c in edge_counts.values()):
-            cost += 1
-    except Exception:
-        pass
-
-    try:
-        if np.any(mesh_pred.area_faces < 1e-10):
-            cost += 1
-    except Exception:
-        pass
-
-    try:
-        dists = np.linalg.norm(mesh_pred.vertices - mesh_pred.centroid, axis=1)
-        if np.any(dists < dists.mean() * 0.3):
-            cost += 1
-    except Exception:
-        pass
-
-    try:
-        if int(mesh_pred.euler_number) != 2:
-            cost += 1
-    except Exception:
-        pass
-
-    if len(mesh_pred.vertices) > 15_000:
-        cost += 1
-
-    return cost
+# cleanup_cost is defined in shared.mesh_quality and re-exported via the import above.
 
 
 # ------------------------------------------------------------------

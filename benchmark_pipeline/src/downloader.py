@@ -32,7 +32,7 @@ import requests
 import trimesh
 
 from .config import BenchmarkConfig
-from .mesh_utils import normalise_mesh
+from shared.mesh_utils import normalise_mesh
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ class Downloader:
 
     def _normalise_and_cache(self, shape_name: str, raw_path: Path) -> Path:
         log.info("[downloader] normalising mesh from %s", raw_path)
-        from .mesh_utils import load_mesh
+        from shared.mesh_utils import load_mesh
         mesh = load_mesh(raw_path)
         mesh = normalise_mesh(mesh)
 

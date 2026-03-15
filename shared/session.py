@@ -9,10 +9,10 @@ Under it, each (shape, model) pair gets its own sub-folder:
         original.stl       ← downloaded + normalised GT mesh
         render.png         ← 1024×1024 canonical render
         reconstructed.glb  ← model output (converted to GLB)
-        metrics.json       ← 6 computed metrics + metadata
+        metrics.json       ← computed metrics + metadata
 
 The session root also holds:
-    summary.csv    ← all 25 rows (5 shapes × 5 models)
+    summary.csv    ← aggregated results
     summary.md     ← markdown table
 """
 

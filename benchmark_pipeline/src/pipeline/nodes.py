@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def _null_metrics(error_msg: str) -> dict:
     """Return a metrics dict marking a (shape, model) pair as failed."""
-    from src.reporter import null_metrics
+    from src.reporter import null_metrics  # benchmark-specific
     return null_metrics(error_msg)
 
 
@@ -56,7 +56,7 @@ def _print_summary(results: dict[tuple[str, str], dict]) -> None:
 
 def setup_node(state: BenchmarkState) -> dict:
     """Create a new timestamped Session directory."""
-    from src.session import Session
+    from shared.session import Session
 
     cfg = state["cfg"]
     session_base = state.get("session_base") or (
@@ -107,7 +107,7 @@ def acquire_node(state: BenchmarkState) -> dict:
 def render_node(state: BenchmarkState) -> dict:
     """Render all successfully acquired meshes to 2D images."""
     import trimesh
-    from src.renderer import Renderer
+    from shared.renderer import Renderer
 
     cfg = state["cfg"]
     shapes: dict[str, dict] = state["shapes"]
@@ -154,7 +154,7 @@ def render_node(state: BenchmarkState) -> dict:
 
 def reconstruct_node(state: BenchmarkState) -> dict:
     """Call each model API to reconstruct 3D meshes from rendered images."""
-    from src.models import get_model_client
+    from shared.models import get_model_client
 
     cfg = state["cfg"]
     shapes: dict[str, dict] = state["shapes"]
@@ -297,7 +297,7 @@ def recompute_node(state: BenchmarkState) -> dict:
     """Re-run metrics on all pairs found in an existing session directory."""
     from src.metrics import MetricsCalculator
     from src.reporter import Reporter
-    from src.session import ArtifactDir, Session
+    from shared.session import ArtifactDir, Session
 
     cfg = state["cfg"]
     session_path: Path = state["recompute_from"]

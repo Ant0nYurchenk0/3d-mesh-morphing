@@ -1,0 +1,113 @@
+# ============================================================
+# 3D Mesh Morphing Pipeline — Configuration
+# ============================================================
+# Run:
+#   uv run python run_morphing.py --input-image photo.png --prompt-file morph.txt
+#   uv run python run_morphing.py --input-mesh object.glb --prompt-file morph.txt
+# ============================================================
+
+# ============================================================
+# Image-to-3D Models — called via HuggingFace Spaces (gradio_client)
+# ============================================================
+
+models:
+  trellis:
+    space_id: "trellis-community/TRELLIS"
+    api_name: "/generate_and_extract_glb"
+    output_format: glb
+    seed: 42
+    ss_guidance_strength: 7.5
+    ss_sampling_steps: 12
+    slat_guidance_strength: 3.0
+    slat_sampling_steps: 12
+    mesh_simplify: 0.95
+    texture_size: 1024
+
+  trellis2:
+    space_id: "microsoft/TRELLIS.2"
+    api_name: "/image_to_3d"
+    output_format: glb
+    seed: 42
+    resolution: "1024"
+    ss_guidance_strength: 7.5
+    ss_guidance_rescale: 0.7
+    ss_sampling_steps: 12
+    ss_rescale_t: 5.0
+    shape_slat_guidance_strength: 7.5
+    shape_slat_guidance_rescale: 0.5
+    shape_slat_sampling_steps: 12
+    shape_slat_rescale_t: 3.0
+    tex_slat_guidance_strength: 1.0
+    tex_slat_guidance_rescale: 0.0
+    tex_slat_sampling_steps: 12
+    tex_slat_rescale_t: 3.0
+    decimation_target: 300000
+    texture_size: 2048
+
+  hunyuan3d:
+    space_id: "tencent/Hunyuan3D-2"
+    api_name: "/shape_generation"
+    output_format: glb
+    steps: 30
+    guidance_scale: 5.0
+    seed: 1234
+    octree_resolution: 256
+    num_chunks: 8000
+
+
+# ============================================================
+# Rendering (used by node 3: render_mesh_node)
+# ============================================================
+
+render:
+  width: 1024
+  height: 1024
+  elev_deg: 20.0
+  azim_deg: 30.0
+  fill_fraction: 0.65
+  fill_tolerance: 0.05
+  fill_search_iters: 8
+  bg_color: [1.0, 1.0, 1.0]
+  key_light_intensity: 3.0
+  fill_light_intensity: 1.5
+  back_light_intensity: 1.0
+
+
+# ============================================================
+# OpenAI Image Generation (nodes 1 and 4)
+# ============================================================
+
+image_generation:
+  # "gpt-image-1" — latest GPT image model (recommended, returns b64_json)
+  # "dall-e-2"    — older model, returns URL
+  model: "gpt-image-1"
+  size: "1024x1024"   # "256x256" | "512x512" | "1024x1024"
+
+
+# ============================================================
+# Mesh Repair (node 6)
+# ============================================================
+
+repair:
+  # Stage 1 — PyMeshLab (always runs)
+  target_faces: 10000             # Decimate to this face count
+  max_hole_size: 100              # Max boundary-edge count for hole closing
+  min_component_diameter_pct: 10  # Remove fragments < 10% of bounding-box diagonal
+
+  # Stage 2 — ManifoldPlus (runs if cleanup_cost > 0 after stage 1)
+  # Install: https://github.com/hjwdzh/ManifoldPlus
+  manifoldplus_depth: 8           # Voxel resolution for manifold wrapping (8=default)
+  manifoldplus_path: "manifoldplus"  # Binary name or absolute path
+
+  # Stage 3 — Instant Meshes (only if --remesh flag is passed)
+  # Install: https://github.com/wjakob/instant-meshes
+  instant_meshes_path: "InstantMeshes"  # Binary name or absolute path
+
+
+# ============================================================
+# Pipeline execution
+# ============================================================
+
+pipeline:
+  api_delay_seconds: 2.0   # Sleep between model API calls
+  session_dir: "sessions"  # Relative to morphing_pipeline/ root

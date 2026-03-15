@@ -78,7 +78,7 @@ models:
     api_name: "/image_to_3d"      # step 1 of 2; step 2 is /extract_glb (same session)
     output_format: glb
     seed: 42
-    resolution: "1024"            # "512" | "1024" | "1536"
+    resolution: "512"             # "512" | "1024" | "1536" — lowered to reduce OOM on complex shapes
     # Structured latent diffusion params (TRELLIS.2-specific)
     ss_guidance_strength: 7.5
     ss_guidance_rescale: 0.7

@@ -1,0 +1,25 @@
+# Virtual environments (host paths are invalid inside the container)
+**/.venv
+**/venv
+
+# Session outputs and caches
+morphing_pipeline/sessions/
+benchmark_pipeline/sessions/
+benchmark_pipeline/cache/
+
+# Local data files (mounted via compose volumes at runtime)
+morphing_pipeline/data/
+
+# Python bytecode
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+
+# Editor and OS artifacts
+**/.DS_Store
+**/.idea/
+**/.vscode/
+
+# Secrets (never in image)
+**/.env

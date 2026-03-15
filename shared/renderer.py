@@ -37,7 +37,7 @@ from typing import Any
 import numpy as np
 import trimesh
 
-from .config import RenderConfig
+from shared.config import RenderConfig
 
 log = logging.getLogger(__name__)
 
@@ -54,10 +54,12 @@ def _detect_backend() -> str:
     pyopengl_platform = os.environ.get("PYOPENGL_PLATFORM", "osmesa")
     os.environ.setdefault("PYOPENGL_PLATFORM", pyopengl_platform)
     try:
-        import pyrender  # noqa: F401
-        import OpenGL    # noqa: F401
+        import pyrender
+        # Probe actual OSMesa initialisation — import success is not sufficient
+        r = pyrender.OffscreenRenderer(4, 4)
+        r.delete()
         return "pyrender"
-    except (ImportError, Exception):
+    except Exception:
         return "matplotlib"
 
 

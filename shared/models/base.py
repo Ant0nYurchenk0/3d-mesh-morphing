@@ -98,8 +98,9 @@ class ImageTo3DClient(ABC):
             except Exception as exc:
                 last_exc = exc
                 log.warning(
-                    "[%s] attempt %d failed: %s",
-                    self.__class__.__name__, attempt + 1, exc
+                    "[%s] attempt %d failed: %s: %s",
+                    self.__class__.__name__, attempt + 1,
+                    type(exc).__name__, exc,
                 )
                 if attempt < attempts - 1:
                     sleep_t = self.delay_seconds * (2 ** attempt)
