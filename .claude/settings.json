@@ -8,7 +8,9 @@
       "Read(//tmp/**)",
       "Read(//private/tmp/**)",
       "Bash(grep -E \"Cannot find|cannot find|[Ll]inking|InstantMeshes$|/tmp/InstantMeshes/build/Instant\")",
-      "Bash(xargs -I{} cat \"/Users/ayurc/Documents/Prog/Python/3d-mesh-morphing/morphing_pipeline/sessions/{}/repair_report.json\")"
+      "Bash(xargs -I{} cat \"/Users/ayurc/Documents/Prog/Python/3d-mesh-morphing/morphing_pipeline/sessions/{}/repair_report.json\")",
+      "Bash(uv add:*)",
+      "Bash(.venv/bin/python -c \":*)"
     ]
   }
 }

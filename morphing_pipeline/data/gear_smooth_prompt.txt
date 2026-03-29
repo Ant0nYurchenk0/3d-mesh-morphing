@@ -1,1 +1,3 @@
-Make the gear have smoothed out edges
+There is a gear in the image. your task is to generate a new image with smoothed out edges.
+The generated image must only contain the object itself, colored in white on a black background. 
+There must be no shadows, no extra stuff, just the transformed original image on a blank background.

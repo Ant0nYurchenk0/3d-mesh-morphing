@@ -64,7 +64,7 @@ COPY benchmark_pipeline/pyproject.toml ./
 
 # Resolve + lock deps, then install (render = pyrender/PyOpenGL, dino = torch+transformers)
 # torch on ARM64 Linux is CPU-only (no CUDA), so the wheel is ~300 MB not ~2 GB.
-RUN uv lock && uv sync --extra render --extra dino --no-dev 2>&1
+RUN uv lock && uv sync --extra render --extra dino --extra dataset --no-dev 2>&1
 
 # ── Source code ──────────────────────────────────────────────
 COPY benchmark_pipeline/ .

@@ -24,11 +24,14 @@ Graph topology:
                       [target_mesh]       ← (5) image-to-3D target mesh
                              │
                              ▼
-                      [repair_mesh]       ← (6) mesh repair (placeholder)
+                      [repair_mesh]       ← (6) mesh repair
                              │
-                             ▼
-                      [morph_meshes]      ← (7) mesh transition (placeholder)
-                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+  [morph_meshes_sdf]          [morph_meshes_differential]
+  (7a) SDF interpolation      (7b) differential rendering (placeholder)
+              │                             │
+              └──────────────┬──────────────┘
                              ▼
                             END
 
@@ -47,7 +50,8 @@ from .nodes import (
     enhance_image_node,
     image_to_base_mesh_node,
     morph_image_node,
-    morph_meshes_node,
+    morph_meshes_differential_node,
+    morph_meshes_sdf_node,
     render_mesh_node,
     repair_mesh_node,
     setup_node,
@@ -63,6 +67,14 @@ def _route_after_setup(state: MorphingState) -> str:
     return "render_mesh"
 
 
+def _route_morph_method(state: MorphingState) -> str:
+    """Route to the requested morphing node."""
+    method = state.get("morph_method", "sdf")
+    if method == "differential":
+        return "morph_meshes_differential"
+    return "morph_meshes_sdf"
+
+
 def build_graph():
     """Compile and return the morphing pipeline as an executable LangGraph."""
     graph = StateGraph(MorphingState)
@@ -74,7 +86,8 @@ def build_graph():
     graph.add_node("morph_image", morph_image_node)
     graph.add_node("target_mesh", target_mesh_node)
     graph.add_node("repair_mesh", repair_mesh_node)
-    graph.add_node("morph_meshes", morph_meshes_node)
+    graph.add_node("morph_meshes_sdf", morph_meshes_sdf_node)
+    graph.add_node("morph_meshes_differential", morph_meshes_differential_node)
 
     graph.set_entry_point("setup")
 
@@ -92,10 +105,21 @@ def build_graph():
     # Mesh flow: render_mesh → morph_image (bypasses image_to_base_mesh)
     graph.add_edge("render_mesh", "morph_image")
 
-    # Common tail: morph_image → target_mesh → repair_mesh → morph_meshes → END
+    # Common tail: morph_image → target_mesh → repair_mesh → (route) → END
     graph.add_edge("morph_image", "target_mesh")
     graph.add_edge("target_mesh", "repair_mesh")
-    graph.add_edge("repair_mesh", "morph_meshes")
-    graph.add_edge("morph_meshes", END)
+
+    # Route based on morph_method after repair
+    graph.add_conditional_edges(
+        "repair_mesh",
+        _route_morph_method,
+        {
+            "morph_meshes_sdf": "morph_meshes_sdf",
+            "morph_meshes_differential": "morph_meshes_differential",
+        },
+    )
+
+    graph.add_edge("morph_meshes_sdf", END)
+    graph.add_edge("morph_meshes_differential", END)
 
     return graph.compile()

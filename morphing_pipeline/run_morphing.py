@@ -129,6 +129,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run Instant Meshes remesh as stage 3 of repair (node 6).",
     )
+    p.add_argument(
+        "--morph-method",
+        choices=["sdf", "differential"],
+        default="sdf",
+        help=(
+            "Morphing algorithm for node 7 (default: sdf). "
+            "'sdf' = SDF interpolation + marching cubes; "
+            "'differential' = placeholder (not yet implemented)."
+        ),
+    )
     p.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
 
     return p.parse_args(argv)
@@ -194,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("skip_enhance   : %s", args.skip_enhance)
     log.info("skip_base_mesh : %s", args.skip_base_mesh)
     log.info("remesh         : %s", args.remesh)
+    log.info("morph_method   : %s", args.morph_method)
 
     from src.pipeline.graph import build_graph
 
@@ -207,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         "skip_base_mesh": args.skip_base_mesh,
         "model_name": model_name,
         "remesh": args.remesh,
+        "morph_method": args.morph_method,
         # Set by nodes:
         "session": None,
         "prompt": "",

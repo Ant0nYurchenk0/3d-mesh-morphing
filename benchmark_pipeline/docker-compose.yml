@@ -7,14 +7,14 @@
 #   2. docker compose build
 #
 # Usage examples:
-#   # Full matrix (5 shapes × 5 models)
-#   docker compose run pipeline
+#   # Full matrix (all shapes × all models from config.yaml)
+#   docker compose run benchmark_pipeline
 #
 #   # Subset
-#   docker compose run pipeline --shapes gear,sphere --models trellis,hunyuan3d
+#   docker compose run benchmark_pipeline --shapes dragon,skull --models trellis,hunyuan3d
 #
 #   # Dry run (download + render only, no model API calls)
-#   docker compose run pipeline --dry-run --shapes gear
+#   docker compose run benchmark_pipeline --dry-run --shapes dragon
 #
 #   # List available shapes/models
 #   docker compose run pipeline --list
@@ -44,8 +44,7 @@ services:
       - ./sessions:/app/benchmark_pipeline/sessions
       # Mesh download cache persists between runs
       - ./cache:/app/benchmark_pipeline/cache
+      # Mount config so edits take effect without rebuilding the image
+      - ./config.yaml:/app/benchmark_pipeline/config.yaml:ro
 
-    # Default: run full matrix. Override at runtime with CLI args.
-    command: >
-      --shapes gear,star,torus,sphere,cloud
-      --models trellis,trellis2,hunyuan3d,triposg,spar3d
+

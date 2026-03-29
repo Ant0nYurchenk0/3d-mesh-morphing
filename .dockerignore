@@ -7,9 +7,6 @@ morphing_pipeline/sessions/
 benchmark_pipeline/sessions/
 benchmark_pipeline/cache/
 
-# Local data files (mounted via compose volumes at runtime)
-morphing_pipeline/data/
-
 # Python bytecode
 **/__pycache__/
 **/*.pyc

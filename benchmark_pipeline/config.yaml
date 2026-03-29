@@ -20,39 +20,68 @@
 # ============================================================
 
 shapes:
-  gear:
-    thingiverse_id: null          # Replace with a valid Thingi10K ID, e.g. 3635
-    search_query: "spur gear"
-    file_ext: stl
-    primitive_type: gear          # procedural fallback: 10-tooth spur gear
-    primitive_params:
-      n_teeth: 10
-      outer_radius: 1.0
-      inner_radius: 0.72
-      height: 0.4
+  # ── Complex organic shapes from Thingi10K ──────────────────────────────
+  # thingi10k_file_id: loaded directly from the local HF-cached dataset
+  # (no CLIP/semantic search needed). Requires: uv sync --extra dataset
 
-  star:
-    thingiverse_id: null          # Replace with a valid Thingi10K ID
-    search_query: "star shape"
+  shape_37384:
+    thingi10k_file_id: 37384
     file_ext: stl
-    primitive_type: star          # procedural fallback: 5-pointed star
-    primitive_params:
-      n_points: 5
-      outer_radius: 1.0
-      inner_radius: 0.4
-      height: 0.3
 
-  sphere:
-    thingiverse_id: null          # Replace with a valid Thingi10K ID
-    search_query: "sphere solid"
+  shape_37416:
+    thingi10k_file_id: 37416
     file_ext: stl
-    primitive_type: sphere        # procedural fallback: subdivided icosphere
 
-  torus:
-    thingiverse_id: null          # Replace with a valid Thingi10K ID
-    search_query: "torus donut"
+  shape_38554:
+    thingi10k_file_id: 38554
     file_ext: stl
-    primitive_type: torus         # procedural fallback: trimesh torus
+
+  shape_38741:
+    thingi10k_file_id: 38741
+    file_ext: stl
+
+  shape_44498:
+    thingi10k_file_id: 44498
+    file_ext: stl
+
+  shape_48013:
+    thingi10k_file_id: 48013
+    file_ext: stl
+
+  # ── Simple procedural primitives (commented out) ──────────────────────
+  # gear:
+  #   thingiverse_id: null
+  #   search_query: "spur gear"
+  #   file_ext: stl
+  #   primitive_type: gear
+  #   primitive_params:
+  #     n_teeth: 10
+  #     outer_radius: 1.0
+  #     inner_radius: 0.72
+  #     height: 0.4
+  #
+  # star:
+  #   thingiverse_id: null
+  #   search_query: "star shape"
+  #   file_ext: stl
+  #   primitive_type: star
+  #   primitive_params:
+  #     n_points: 5
+  #     outer_radius: 1.0
+  #     inner_radius: 0.4
+  #     height: 0.3
+  #
+  # sphere:
+  #   thingiverse_id: null
+  #   search_query: "sphere solid"
+  #   file_ext: stl
+  #   primitive_type: sphere
+  #
+  # torus:
+  #   thingiverse_id: null
+  #   search_query: "torus donut"
+  #   file_ext: stl
+  #   primitive_type: torus
 
 # ============================================================
 # Models — all called via HuggingFace Spaces (gradio_client)
@@ -63,6 +92,7 @@ models:
     # Community fork of microsoft/TRELLIS-image-large — exposes /start_session
     # to work around the session-directory bug in the original microsoft/TRELLIS.
     space_id: "trellis-community/TRELLIS"
+    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
     api_name: "/generate_and_extract_glb"   # combined generate+extract endpoint
     output_format: glb
     seed: 42
@@ -75,6 +105,7 @@ models:
 
   trellis2:
     space_id: "microsoft/TRELLIS.2"
+    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
     api_name: "/image_to_3d"      # step 1 of 2; step 2 is /extract_glb (same session)
     output_format: glb
     seed: 42
@@ -97,6 +128,7 @@ models:
 
   hunyuan3d:
     space_id: "tencent/Hunyuan3D-2"
+    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
     api_name: "/shape_generation"   # verified; NOT /generate
     output_format: glb
     steps: 30
@@ -155,7 +187,7 @@ metrics:
 
 pipeline:
   api_delay_seconds: 2.0   # Sleep between successive model API calls
-  max_retries: 1           # Retry failed calls once before recording error
+  max_retries: 0           # No retries — transient GPU errors don't recover in 2s
   session_dir: "sessions"  # Relative to pipeline/ root
 
   # Download strategy (tried in order when not "primitive_only"):
@@ -163,7 +195,7 @@ pipeline:
   #   "http_only"      — HTTP by thingiverse_id, then primitive fallback
   #   "package_only"   — thingi10k package only (requires: uv sync --extra dataset)
   #   "primitive_only" — always use trimesh procedural primitives (offline, no downloads)
-  download_strategy: "http_only"
+  download_strategy: "auto"        # tries thingi10k package first (uses thingi10k_file_id), then HTTP, then primitive
 
   # Automatically fall back to trimesh primitives when download fails (e.g. 404 IDs).
   # Set to false to hard-fail instead of silently using a synthetic mesh.

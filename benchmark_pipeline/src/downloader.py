@@ -4,8 +4,10 @@ Mesh downloader / generator with three strategies (tried in order):
   Strategy A ("package"):   thingi10k Python package — semantic search by query.
                             Requires: uv sync --extra dataset
 
-  Strategy B ("http"):      Direct HTTP download from ten-thousand-models.appspot.com
-                            by Thingiverse ID.
+  Strategy B ("http"):      Download by Thingiverse thing ID.
+                            First tries ten-thousand-models.appspot.com (thingi10k dataset,
+                            10K curated file IDs). If that returns 404, falls back to the
+                            Thingiverse API (requires THINGIVERSE_TOKEN env var).
 
   Strategy C ("primitive"): Trimesh procedural mesh. Always works offline.
                             Shapes: gear, star, sphere, torus, cloud.
@@ -23,6 +25,7 @@ pipeline/cache/{shape_name}/ to avoid re-downloading.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -37,6 +40,7 @@ from shared.mesh_utils import normalise_mesh
 log = logging.getLogger(__name__)
 
 _THINGI_DOWNLOAD_URL = "https://ten-thousand-models.appspot.com/download/id/{id}"
+_THINGIVERSE_API_FILES_URL = "https://api.thingiverse.com/things/{thing_id}/files"
 _CACHE_ROOT = Path(__file__).parent.parent / "cache"
 
 
@@ -123,14 +127,28 @@ class Downloader:
                 "thingi10k package not installed. Run: uv sync --extra dataset"
             ) from exc
 
-        query = shape_cfg.get("search_query", shape_name)
-        log.info("[downloader/package] searching for '%s'", query)
-        entries = list(thingi10k.dataset(query=query))
-        if not entries:
-            raise ValueError(f"No thingi10k results for query: '{query}'")
+        # If a specific file_id is given, look it up directly — no CLIP needed.
+        thingi10k_file_id = shape_cfg.get("thingi10k_file_id")
+        if thingi10k_file_id is not None:
+            log.info("[downloader/package] looking up file_id=%s for '%s'", thingi10k_file_id, shape_name)
+            thingi10k.init()
+            entry = next(
+                (e for e in thingi10k.dataset() if e["file_id"] == thingi10k_file_id),
+                None,
+            )
+            if entry is None:
+                raise ValueError(
+                    f"thingi10k_file_id={thingi10k_file_id} not found in dataset"
+                )
+        else:
+            query = shape_cfg.get("search_query", shape_name)
+            log.info("[downloader/package] searching for '%s' (requires CLIP)", query)
+            entries = list(thingi10k.dataset(query=query))
+            if not entries:
+                raise ValueError(f"No thingi10k results for query: '{query}'")
+            entry = entries[0]
 
-        entry = entries[0]
-        log.info("[downloader/package] found entry: %s", entry.get("file_id", "?"))
+        log.info("[downloader/package] found entry: file_id=%s, name=%r", entry.get("file_id", "?"), str(entry.get("name", ""))[:60])
         vertices, facets = thingi10k.load_file(entry["file_path"])
         mesh = trimesh.Trimesh(vertices=vertices, faces=facets, process=False)
 
@@ -145,10 +163,18 @@ class Downloader:
 
     def _download_http(self, shape_name: str, shape_cfg: dict) -> Path:
         tid = shape_cfg["thingiverse_id"]
+
+        # Try thingi10k HTTP endpoint first (works for the 10K curated file IDs).
         url = _THINGI_DOWNLOAD_URL.format(id=tid)
         log.info("[downloader/http] GET %s", url)
-
         resp = requests.get(url, timeout=60, stream=True)
+
+        if resp.status_code == 404:
+            log.info(
+                "[downloader/http] thingi10k 404 for id=%s — trying Thingiverse API", tid
+            )
+            return self._download_thingiverse_api(shape_name, shape_cfg, tid)
+
         resp.raise_for_status()
 
         ext = _ext_from_response(resp) or shape_cfg.get("file_ext", "stl")
@@ -160,6 +186,53 @@ class Downloader:
                 fh.write(chunk)
 
         log.info("[downloader/http] saved %d bytes to %s", tmp_path.stat().st_size, tmp_path)
+        return tmp_path
+
+    def _download_thingiverse_api(
+        self, shape_name: str, shape_cfg: dict, thing_id: int | str
+    ) -> Path:
+        token = os.environ.get("THINGIVERSE_TOKEN")
+        if not token:
+            raise RuntimeError(
+                f"Thingiverse thing {thing_id} is not in the thingi10k dataset. "
+                "Set THINGIVERSE_TOKEN to download directly from the Thingiverse API."
+            )
+
+        headers = {"Authorization": f"Bearer {token}"}
+        files_url = _THINGIVERSE_API_FILES_URL.format(thing_id=thing_id)
+        log.info("[downloader/thingiverse-api] GET %s", files_url)
+
+        resp = requests.get(files_url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        files = resp.json()
+
+        if not files:
+            raise ValueError(f"Thingiverse thing {thing_id} has no downloadable files")
+
+        target_ext = shape_cfg.get("file_ext", "stl").lower()
+        file_info = next(
+            (f for f in files if f.get("name", "").lower().endswith(f".{target_ext}")),
+            files[0],
+        )
+        name = file_info.get("name", f"{shape_name}.{target_ext}")
+        download_url = file_info["download_url"]
+        log.info("[downloader/thingiverse-api] downloading file: %s", name)
+
+        dl_resp = requests.get(download_url, headers=headers, timeout=60, stream=True)
+        dl_resp.raise_for_status()
+
+        ext = Path(name).suffix.lstrip(".").lower() or target_ext
+        tmp_path = _CACHE_ROOT / shape_name / f"{shape_name}_raw.{ext}"
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(tmp_path, "wb") as fh:
+            for chunk in dl_resp.iter_content(chunk_size=65536):
+                fh.write(chunk)
+
+        log.info(
+            "[downloader/thingiverse-api] saved %d bytes to %s",
+            tmp_path.stat().st_size, tmp_path,
+        )
         return tmp_path
 
     # ------------------------------------------------------------------

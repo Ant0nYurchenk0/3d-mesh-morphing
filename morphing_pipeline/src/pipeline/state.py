@@ -28,6 +28,7 @@ class MorphingState(TypedDict):
     skip_base_mesh: bool            # skip node 2 (image_to_base_mesh); no base mesh gen
     model_name: str                 # image-to-3D model name (trellis, hunyuan3d, …)
     remesh: bool                    # run Instant Meshes remesh as stage 3 of repair (node 6)
+    morph_method: str               # "sdf" | "differential" — which node 7 to run
 
     # ---- Set by setup_node ----
     session: Any                    # Session instance (in-memory only)
@@ -47,8 +48,8 @@ class MorphingState(TypedDict):
     # Node 6 output:
     repaired_mesh_path: str | None  # repaired version of target mesh
     repair_report: dict | None      # repair stage summary (costs, stages_run, face_count)
-    # Node 7 output (placeholder):
-    transition_path: str | None     # path to directory with transition frames / blend file
+    # Node 7 output:
+    transition_path: str | None     # path to directory with transition frames
 
     # ---- Control ----
     exit_code: int

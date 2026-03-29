@@ -18,6 +18,8 @@ dependencies = [
     "langgraph>=0.2,<1.0",
     "typing-extensions>=4.9",
     "openai>=1.30",
+    "scikit-image>=0.26.0",
+    "fast-simplification>=0.1.13",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,19 @@ render = [
 # PyMeshLab for stage-1 mesh repair. Install with: uv sync --extra repair
 repair = [
     "pymeshlab>=2023.12",
+]
+# PyTorch for differential rendering morphing (node 7b). Install with: uv sync --extra diffrender
+# NOTE: pytorch3d must be installed separately (not on PyPI) — see instructions below:
+#   CPU dev (macOS/Linux):
+#     pip install fvcore iopath
+#     pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+#   Docker GPU (add to Dockerfile after pytorch/pytorch base image):
+#     RUN pip install fvcore iopath
+#     RUN pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+diffrender = [
+    "torch>=2.2",
+    "fvcore>=0.1.5",
+    "iopath>=0.1.9",
 ]
 
 [tool.setuptools]

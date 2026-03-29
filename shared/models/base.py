@@ -27,6 +27,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+_NO_RETRY_ERRORS = ("paused", "invalid state", "sleeping")
+
 
 class ImageTo3DClient(ABC):
     """
@@ -59,8 +61,11 @@ class ImageTo3DClient(ABC):
     def client(self):
         if self.__client is None:
             from gradio_client import Client  # type: ignore
-            log.info("[%s] connecting to Space %s", self.__class__.__name__, self.space_id)
-            self.__client = Client(self.space_id, token=self.hf_token)
+            endpoint_url = self._cfg.get("endpoint_url") or ""
+            url = endpoint_url if endpoint_url else self.space_id
+            token = None if endpoint_url else self.hf_token
+            log.info("[%s] connecting to %s", self.__class__.__name__, url)
+            self.__client = Client(url, token=token)
         return self.__client
 
     def view_api(self) -> None:
@@ -102,6 +107,10 @@ class ImageTo3DClient(ABC):
                     self.__class__.__name__, attempt + 1,
                     type(exc).__name__, exc,
                 )
+                if any(kw in str(exc).lower() for kw in _NO_RETRY_ERRORS):
+                    raise RuntimeError(
+                        f"[{self.__class__.__name__}] space unavailable, not retrying: {exc}"
+                    ) from exc
                 if attempt < attempts - 1:
                     sleep_t = self.delay_seconds * (2 ** attempt)
                     log.info("[%s] retrying in %.1fs...", self.__class__.__name__, sleep_t)

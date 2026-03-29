@@ -105,6 +105,38 @@ repair:
 
 
 # ============================================================
+# Mesh Morphing (node 7)
+# ============================================================
+
+morph:
+  grid_resolution: 64   # SDF voxel grid per axis (64³ ≈ 262k pts, ~30s on CPU)
+  n_frames: 30          # Number of interpolated frames (t = 0 → 1)
+
+
+# ============================================================
+# Differential Rendering Morphing (node 7b)
+# Run with: --morph-method differential
+# ============================================================
+
+diff_rend:
+  n_steps: 4000         # optimizer steps (set to 100–500 for quick CPU dev runs)
+  lr: 0.001             # Adam learning rate
+  n_frames: 40          # checkpoint frames to save as GLBs
+  n_views: 20           # camera viewpoints for silhouette loss (2 elevation rings)
+  image_size: 256       # silhouette render resolution (px) — keep ≤256 for speed
+  n_sample_pts: 5000    # surface points sampled per mesh for Chamfer distance
+  # Loss weights — chamfer must dominate; silhouette is secondary 2D guidance only.
+  # When both meshes are already geometrically similar, chamfer starts near-zero and
+  # silhouette (which measures visual difference) is ~24x larger. Equal weights let
+  # silhouette hijack the optimizer, moving the mesh away from the 3D target.
+  w_chamfer: 5.0        # primary 3D shape loss — must dominate over silhouette
+  w_silhouette: 0.1     # secondary 2D boundary guidance — was 1.0, caused conflicts
+  w_laplacian: 1.0      # strong smoothness — was 0.1, mesh became spiky
+  w_normal: 0.1         # normal consistency
+  w_edge: 0.01          # minimal edge regularizer
+
+
+# ============================================================
 # Pipeline execution
 # ============================================================
 
