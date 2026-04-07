@@ -1,81 +1,126 @@
-# ============================================================
-# TRELLIS — RunPod self-hosted inference pod
-# ============================================================
-# Model:   microsoft/TRELLIS-image-large
-# Code:    github.com/microsoft/TRELLIS (+ submodules)
-# GPU:     A100 40 GB recommended (16 GB absolute minimum)
-# VRAM:    ~16 GB at default settings
+# ── TRELLIS on-premise inference server ─────────────────────────────────────
 #
-# Build (from repo root — build context must include the TRELLIS submodule):
-#   docker build --build-arg HF_TOKEN=<token> \
-#     -t your-user/trellis:latest \
-#     -f runpod/trellis/Dockerfile .
+# Build (add --platform because RunPod pods are linux/amd64; required on Apple Silicon):
+#   docker build --platform linux/amd64 -t your-user/trellis-server:latest .
 #
-# WARNING: This build compiles several CUDA extensions (spconv, nvdiffrast,
-# kaolin, diffoctreerast). Expect 30–60 min on first build.
-# Use Docker layer caching — do not pass --no-cache unless necessary.
-# ============================================================
+# Run (weights downloaded at first start; mount a volume to cache them):
+#   docker run --gpus all -p 7860:7860 \
+#     -e HF_TOKEN=hf_xxx \
+#     -v /path/to/hf-cache:/hf-cache \
+#     your-user/trellis-server:latest
+#
+# Notes:
+#   • flash-attn is compiled from source during image build (~20 min).
+#     To speed this up, replace the flash-attn pip install line with a
+#     pre-built wheel from https://github.com/Dao-MixedPrecision/flash-attention/releases
+#   • Model weights (~10 GB) are downloaded on first run into $HF_HOME.
+#     Use a RunPod network volume at /hf-cache to persist them.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Use devel image for CUDA headers needed by extension compilation
-FROM --platform=linux/amd64 pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-devel
 
-# ── System dependencies ──────────────────────────────────────
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Target GPU architectures for CUDA extension compilation.
+# Required when building cross-platform (e.g. Apple Silicon → linux/amd64)
+# because no GPU is available to auto-detect the architecture.
+# Covers the most common RunPod GPUs: T4 / A100 / A10G / L40S / H100.
+ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0"
+
+# System libraries required for headless GL and build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
-        git-lfs \
-        curl \
+        wget \
         build-essential \
-        cmake \
         ninja-build \
-        libgl1 \
+        libgl1-mesa-glx \
         libglib2.0-0 \
-        libgomp1 \
-    && git lfs install \
+        libsm6 \
+        libxext6 \
+        libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Clone TRELLIS with submodules ────────────────────────────
-RUN git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git /app/trellis
-WORKDIR /app/trellis
+# ── Python dependencies ──────────────────────────────────────────────────────
 
-# ── Python dependencies ──────────────────────────────────────
-# Install xformers and flash-attn before requirements.txt to ensure
-# CUDA-compatible wheels are used.
+# 1. xformers — memory-efficient attention (pre-built for torch 2.1.2 + cu121)
 RUN pip install --no-cache-dir \
-        "xformers==0.0.27.post2" \
-        "flash-attn>=2.6.0" \
-        --index-url https://download.pytorch.org/whl/cu124
+        "xformers==0.0.23.post1" \
+        --index-url https://download.pytorch.org/whl/cu121
 
-RUN pip install --no-cache-dir -r requirements.txt
+# 2. flash-attn — pin to 2.5.9.post1, the last version compatible with torch 2.1.x.
+#    flash-attn ≥2.6 uses std::optional which clashes with torch 2.1's c10::optional.
+RUN pip install --no-cache-dir "flash-attn==2.5.9.post1" --no-build-isolation
 
-# ── Compile CUDA extensions ──────────────────────────────────
-# TRELLIS's setup.sh installs these; replicated here for Docker.
-# Each extension is in a submodule under extensions/.
+# 3. spconv — sparse convolutions (cu120 wheel works with CUDA 12.x)
+RUN pip install --no-cache-dir spconv-cu120
+
+# 4. kaolin — NVIDIA 3D deep learning library
 RUN pip install --no-cache-dir \
-        "spconv-cu124" \
-        "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git"
+        kaolin \
+        -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.0_cu121.html
 
-# kaolin (needed for mesh operations)
+# 5. utils3d — geometry utilities; pin to the exact commit used by TRELLIS setup.sh
 RUN pip install --no-cache-dir \
-        "kaolin @ https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu124/kaolin-0.17.0-cp310-cp310-linux_x86_64.whl"
+        "git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8"
 
-# ── Gradio app dependencies ───────────────────────────────────
-RUN pip install --no-cache-dir "gradio==4.44.0" "huggingface_hub[cli]"
+# 6. TRELLIS — clone the repo (no setup.py/pyproject.toml; import via PYTHONPATH)
+RUN git clone --recurse-submodules --depth 1 \
+        https://github.com/microsoft/TRELLIS.git /opt/TRELLIS
 
-# ── Model weights ────────────────────────────────────────────
-ARG HF_TOKEN
-RUN python - <<'PYEOF'
-import os
-from huggingface_hub import snapshot_download
-snapshot_download("microsoft/TRELLIS-image-large", local_dir="/models/trellis", token=os.environ["HF_TOKEN"])
-PYEOF
+# 7. TRELLIS runtime dependencies — mirrors setup.sh --basic exactly, plus extras
+#    setup.sh --basic: pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless
+#                      scipy ninja rembg onnxruntime trimesh open3d xatlas pyvista
+#                      pymeshfix igraph transformers
+#    extras: plyfile safetensors accelerate lpips diffusers (needed by TRELLIS pipeline)
+RUN pip install --no-cache-dir \
+        pillow \
+        imageio \
+        imageio-ffmpeg \
+        tqdm \
+        easydict \
+        opencv-python-headless \
+        scipy \
+        ninja \
+        rembg \
+        onnxruntime \
+        trimesh \
+        open3d \
+        xatlas \
+        pyvista \
+        pymeshfix \
+        igraph \
+        transformers \
+        plyfile \
+        safetensors \
+        accelerate \
+        lpips \
+        diffusers
 
-# ── Point app at pre-downloaded weights ──────────────────────
-ENV TRELLIS_MODEL_ROOT=/models/trellis
+# 8. diff-gaussian-rasterization — mip-splatting Gaussian renderer (setup.sh --mipgaussian)
+RUN git clone --depth 1 https://github.com/autonomousvision/mip-splatting.git /tmp/mip-splatting \
+    && pip install --no-cache-dir /tmp/mip-splatting/submodules/diff-gaussian-rasterization/ \
+    && rm -rf /tmp/mip-splatting
 
-# ── Expose Gradio port ───────────────────────────────────────
-EXPOSE 8080
+# 9. nvdiffrast — differentiable rasterization (requires --no-build-isolation)
+RUN pip install --no-cache-dir --no-build-isolation \
+        "git+https://github.com/NVlabs/nvdiffrast.git"
 
-# ── Entry point ──────────────────────────────────────────────
-# app.py is the Gradio demo included in the TRELLIS repo.
-# It exposes /start_session + /generate_and_extract_glb, matching TRELLISClient.
-CMD ["python", "app.py", "--server_name", "0.0.0.0", "--server_port", "8080"]
+# 10. Gradio server + version pins (transformers<4.47, diffusers<0.30, numpy<2.0)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# ── Application ──────────────────────────────────────────────────────────────
+
+COPY server.py /app/server.py
+WORKDIR /app
+
+# Expose the TRELLIS package to Python
+ENV PYTHONPATH=/opt/TRELLIS
+
+# Model weights are downloaded at container startup into $HF_HOME.
+# Override by mounting a volume: -v /host/hf-cache:/hf-cache
+ENV HF_HOME=/hf-cache
+
+EXPOSE 7860
+
+CMD ["python", "server.py"]

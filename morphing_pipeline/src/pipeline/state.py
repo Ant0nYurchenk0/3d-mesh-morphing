@@ -51,5 +51,13 @@ class MorphingState(TypedDict):
     # Node 7 output:
     transition_path: str | None     # path to directory with transition frames
 
+    # ---- Differential rendering intermediate state (nodes 7b-1 → 7b-2 → 7b-3) ----
+    # Passed as file paths so tensors don't need to be JSON-serialisable.
+    diff_base_mesh_path: str | None     # subdivided + PCA-aligned base mesh (GLB)
+    diff_target_mesh_path: str | None   # PCA-aligned target mesh (GLB)
+    diff_offsets_path: str | None       # per-vertex offsets from Phase 1 or 1.5 (NPY)
+    diff_deformed_mesh_path: str | None # raw deformed mesh after Phase 1 (GLB, for inspection)
+    diff_refined_mesh_path: str | None  # refined deformed mesh after Phase 1.5 (GLB, for inspection)
+
     # ---- Control ----
     exit_code: int

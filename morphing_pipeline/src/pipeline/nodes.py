@@ -520,17 +520,23 @@ def morph_meshes_sdf_node(state: MorphingState) -> dict:
 
 
 # ------------------------------------------------------------------
-# Node 7b: morph_meshes_differential
+# Node 7b-1: diff_optimize — Phase 1: gradient-based deformation
 # ------------------------------------------------------------------
 
-def morph_meshes_differential_node(state: MorphingState) -> dict:
+def diff_optimize_node(state: MorphingState) -> dict:
     """
-    Differential rendering morph — two-phase approach.
-    
-    Phase 1: Optimize vertex offsets to deform source → target
-             using coarse-to-fine + progressive Chamfer weighting.
-    Phase 2: Interpolate the learned offsets with smoothstep easing
-             to produce temporally uniform morph frames.
+    Phase 1 of the differential rendering morph.
+
+    Loads base + target meshes, normalises and PCA-aligns both to a Y-up
+    canonical frame, adaptively subdivides the base mesh, then optimises
+    per-vertex offsets using Chamfer + silhouette losses with coarse-to-fine
+    scheduling.
+
+    Saves to session dir for inspection:
+      diff_base_mesh.glb     — subdivided, aligned base mesh
+      diff_target_mesh.glb   — aligned target mesh
+      diff_deformed_raw.glb  — base mesh + raw optimised offsets
+      diff_offsets.npy       — raw per-vertex offsets (float32, shape [N, 3])
     """
     import json
     import torch
@@ -551,12 +557,13 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
         state.get("repaired_mesh_path") or state.get("target_mesh_path")
     )
     if not base_mesh_path or not target_mesh_path:
-        raise RuntimeError("[morph_diff] need both mesh paths")
+        raise RuntimeError("[diff_optimize] need both base_mesh_path and target_mesh_path")
 
     cfg = state["cfg"]
     session = state["session"]
     dc = cfg.diff_rend
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info("[diff_optimize] device=%s  steps=%d", device, dc.n_steps)
 
     # ── Load, normalise, align ───────────────────────────────────────
     mesh_a = _pca_orient(_normalise(
@@ -566,15 +573,22 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
         trimesh.load(str(target_mesh_path), force="mesh", process=True)
     ))
 
-    # Adaptive subdivision — target vertex count, not face count
+    # Adaptive subdivision — need enough vertices for expressive deformation
     while len(mesh_a.vertices) < 2000:
         mesh_a = mesh_a.subdivide()
 
     log.info(
-        "[morph_diff] base: %d verts %d faces | target: %d verts %d faces",
+        "[diff_optimize] base: %d verts %d faces | target: %d verts %d faces",
         len(mesh_a.vertices), len(mesh_a.faces),
         len(mesh_b.vertices), len(mesh_b.faces),
     )
+
+    # ── Save aligned meshes for downstream nodes + inspection ────────
+    base_mesh_out = session.dir / "diff_base_mesh.glb"
+    target_mesh_out = session.dir / "diff_target_mesh.glb"
+    mesh_a.export(str(base_mesh_out))
+    mesh_b.export(str(target_mesh_out))
+    log.info("[diff_optimize] saved diff_base_mesh.glb and diff_target_mesh.glb")
 
     def _to_pt3d(m):
         v = torch.tensor(m.vertices, dtype=torch.float32, device=device)
@@ -584,22 +598,12 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
     src_mesh = _to_pt3d(mesh_a)
     tgt_mesh = _to_pt3d(mesh_b)
 
-    # ── Precompute fixed target samples (reduces per-step noise) ─────
-    # Sample once with many points rather than re-sampling randomly each step.
-    # This eliminates the stochastic jitter from random point sampling.
+    # Pre-sample dense target point cloud once to reduce per-step noise
     with torch.no_grad():
-        tgt_points_dense = sample_points_from_meshes(
-            tgt_mesh, 50_000
-        ).detach()
+        tgt_points_dense = sample_points_from_meshes(tgt_mesh, 50_000).detach()
 
-    # ── Vertex offsets + optimizer ────────────────────────────────────
-    deform_verts = torch.zeros_like(
-        src_mesh.verts_packed(), requires_grad=True
-    )
-
-    # SGD + momentum produces smoother deformation paths than Adam.
-    # Adam's per-parameter adaptive rates cause different vertices to
-    # move at different speeds, creating uneven surface ripples.
+    # ── Optimizer ────────────────────────────────────────────────────
+    deform_verts = torch.zeros_like(src_mesh.verts_packed(), requires_grad=True)
     optimizer = torch.optim.SGD(
         [deform_verts], lr=dc.lr * 5, momentum=0.9, nesterov=True
     )
@@ -607,12 +611,8 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
         optimizer, T_max=dc.n_steps, eta_min=1e-5
     )
 
-    # ── Silhouette renderer — wider blur for stronger gradients ──────
-    # sigma=5e-3 gives ~1.8px blur at 256px. This means vertices up to
-    # ~2 pixels from the silhouette boundary receive meaningful gradients,
-    # compared to ~0.12px with the PyTorch3D default of 1e-4.
-    # Critical for large deformations where vertices need to move far.
-    sigma = 5e-3
+    # ── Silhouette renderer ──────────────────────────────────────────
+    sigma = 5e-3  # ~1.8px blur at 256px — wide enough for large deformations
     raster_settings = RasterizationSettings(
         image_size=dc.image_size,
         blur_radius=float(np.log(1.0 / sigma - 1.0) * sigma),
@@ -620,25 +620,18 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
     )
     silhouette_renderer = MeshRenderer(
         rasterizer=MeshRasterizer(raster_settings=raster_settings),
-        shader=SoftSilhouetteShader(
-            blend_params=BlendParams(sigma=sigma, gamma=1e-4)
-        ),
+        shader=SoftSilhouetteShader(blend_params=BlendParams(sigma=sigma, gamma=1e-4)),
     )
 
     # ── Camera rig — 3 elevation rings ───────────────────────────────
-    # Adding a negative-elevation ring captures the underside, preventing
-    # the optimizer from ignoring geometry below the equator.
     elevs = [-15.0, 5.0, 30.0]
     n_per_ring = max(2, dc.n_views // len(elevs))
     cameras_RT = []
     for elev in elevs:
         for azim in np.linspace(0, 360, n_per_ring, endpoint=False):
-            R, T = look_at_view_transform(
-                dist=2.7, elev=float(elev), azim=float(azim)
-            )
+            R, T = look_at_view_transform(dist=2.7, elev=float(elev), azim=float(azim))
             cameras_RT.append((R.to(device), T.to(device)))
 
-    # Pre-render target silhouettes
     target_sils = []
     with torch.no_grad():
         for R, T in cameras_RT:
@@ -646,50 +639,26 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
             sil = silhouette_renderer(tgt_mesh, cameras=cam)[..., 3]
             target_sils.append(sil.detach())
 
-    # ═══════════════════════════════════════════════════════════════════
-    # PHASE 1: Optimize full deformation (source → target)
-    # ═══════════════════════════════════════════════════════════════════
-    # Coarse-to-fine: start with heavy regularization + few Chamfer
-    # points, then relax regularization and increase point count.
-    # This prevents early collapse into local minima.
-
-    log.info("[morph_diff] Phase 1: optimizing deformation (%d steps)", dc.n_steps)
+    # ── Training loop ────────────────────────────────────────────────
+    log.info("[diff_optimize] Phase 1: optimizing deformation (%d steps)", dc.n_steps)
 
     for step in range(dc.n_steps):
-        progress = step / max(1, dc.n_steps - 1)  # 0 → 1
-
+        progress = step / max(1, dc.n_steps - 1)
         deformed = src_mesh.offset_verts(deform_verts)
 
-        # ── Coarse-to-fine Chamfer sampling ──────────────────────────
-        # Start with 1K points (coarse alignment), ramp to 10K (fine detail)
         n_pts = int(1000 + progress * 9000)
         src_pts = sample_points_from_meshes(deformed, n_pts)
-
-        # Subsample the pre-computed dense target points
         idx = torch.randperm(tgt_points_dense.shape[1])[:n_pts]
         tgt_pts = tgt_points_dense[:, idx, :]
-
         loss_chamfer, _ = chamfer_distance(src_pts, tgt_pts)
 
-        # ── Regularizers — decay over time ───────────────────────────
-        # Heavy early regularization keeps the mesh smooth during
-        # coarse alignment. As we approach the target, relax to allow
-        # fine detail (spikes, teeth, etc.) to form.
         reg_decay = max(0.1, 1.0 - progress * 0.8)
+        loss_edge      = mesh_edge_loss(deformed)
+        loss_laplacian = mesh_laplacian_smoothing(deformed, method="uniform")
+        loss_normal    = mesh_normal_consistency(deformed)
 
-        loss_edge = mesh_edge_loss(deformed)
-        loss_laplacian = mesh_laplacian_smoothing(
-            deformed, method="uniform"
-        )
-        loss_normal = mesh_normal_consistency(deformed)
-
-        # ── Silhouette loss — subsample views each step ──────────────
-        # Using a random subset of views per step is faster and acts as
-        # regularization (like dropout for viewpoints).
         n_sil_views = min(6, len(cameras_RT))
-        view_idx = np.random.choice(
-            len(cameras_RT), n_sil_views, replace=False
-        )
+        view_idx = np.random.choice(len(cameras_RT), n_sil_views, replace=False)
         loss_sil = torch.zeros(1, device=device)
         for i in view_idx:
             R, T = cameras_RT[i]
@@ -698,13 +667,12 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
             loss_sil += ((pred_sil - target_sils[i]) ** 2).mean()
         loss_sil /= n_sil_views
 
-        # ── Combined loss ────────────────────────────────────────────
         loss = (
-            dc.w_chamfer * loss_chamfer
+            dc.w_chamfer    * loss_chamfer
             + dc.w_silhouette * loss_sil
-            + dc.w_laplacian * loss_laplacian * reg_decay
-            + dc.w_normal * loss_normal * reg_decay
-            + dc.w_edge * loss_edge * reg_decay
+            + dc.w_laplacian  * loss_laplacian * reg_decay
+            + dc.w_normal     * loss_normal    * reg_decay
+            + dc.w_edge       * loss_edge      * reg_decay
         )
 
         optimizer.zero_grad()
@@ -715,68 +683,240 @@ def morph_meshes_differential_node(state: MorphingState) -> dict:
 
         if step % 100 == 0:
             log.info(
-                "[morph_diff] step %4d/%d  loss=%.5f"
+                "[diff_optimize] step %4d/%d  loss=%.5f"
                 "  chamfer=%.5f  sil=%.5f  lap=%.5f  reg_decay=%.2f",
                 step, dc.n_steps, loss.item(),
                 loss_chamfer.item(), loss_sil.item(),
                 loss_laplacian.item(), reg_decay,
             )
 
-    # ── Save the final optimized offsets ─────────────────────────────
+    # ── Save raw offsets and deformed mesh for inspection ────────────
     final_offsets = deform_verts.detach().clone()
+    offsets_np = final_offsets.cpu().numpy()
+
+    offsets_out = session.dir / "diff_offsets.npy"
+    np.save(str(offsets_out), offsets_np)
+
+    v_raw = (src_mesh.verts_packed() + final_offsets).cpu().numpy()
+    f_raw = src_mesh.faces_packed().cpu().numpy()
+    raw_mesh = trimesh.Trimesh(vertices=v_raw, faces=f_raw, process=False)
+    raw_mesh.fix_normals()
+    deformed_raw_out = session.dir / "diff_deformed_raw.glb"
+    raw_mesh.export(str(deformed_raw_out))
+
     log.info(
-        "[morph_diff] Phase 1 complete. Offset magnitude: mean=%.4f max=%.4f",
+        "[diff_optimize] Phase 1 complete. Offset magnitude: mean=%.4f max=%.4f. "
+        "Saved diff_deformed_raw.glb and diff_offsets.npy",
         final_offsets.norm(dim=1).mean().item(),
         final_offsets.norm(dim=1).max().item(),
     )
 
-    # ═══════════════════════════════════════════════════════════════════
-    # PHASE 2: Interpolate offsets → morph frames
-    # ═══════════════════════════════════════════════════════════════════
-    # Now that we know WHERE each vertex needs to go, we produce the
-    # animation by smoothly interpolating from zero to the final offsets.
-    # This guarantees uniform temporal progression regardless of how
-    # the optimizer actually got there.
+    return {
+        "diff_base_mesh_path":   str(base_mesh_out),
+        "diff_target_mesh_path": str(target_mesh_out),
+        "diff_offsets_path":     str(offsets_out),
+        "diff_deformed_mesh_path": str(deformed_raw_out),
+    }
+
+
+# ------------------------------------------------------------------
+# Node 7b-2: diff_refine — Phase 1.5: smooth + project offsets
+# ------------------------------------------------------------------
+
+def diff_refine_node(state: MorphingState) -> dict:
+    """
+    Phase 1.5 of the differential rendering morph.
+
+    Takes the raw per-vertex offsets from diff_optimize_node and cleans them
+    up in three steps:
+      1. Laplacian smooth the offset field (kills high-freq noise / ripples)
+      2. Project each deformed vertex onto the closest point on the target surface
+      3. Blend: use projected positions for nearby vertices, smoothed positions
+         where the topology gap is large (avoids tears from forced projection)
+
+    Saves to session dir for inspection:
+      diff_deformed_refined.glb  — deformed mesh after refinement
+      diff_offsets_refined.npy   — refined per-vertex offsets
+    """
+    from collections import defaultdict
+    import torch
+    from scipy.sparse import lil_matrix, eye as speye
+
+    base_mesh_path   = state.get("diff_base_mesh_path")
+    target_mesh_path = state.get("diff_target_mesh_path")
+    offsets_path     = state.get("diff_offsets_path")
+    if not base_mesh_path or not target_mesh_path or not offsets_path:
+        raise RuntimeError(
+            "[diff_refine] missing diff_base_mesh_path / diff_target_mesh_path / diff_offsets_path"
+        )
+
+    session = state["session"]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info("[diff_refine] Phase 1.5: refining offsets")
+
+    mesh_a  = trimesh.load(str(base_mesh_path),   force="mesh", process=False)
+    mesh_b  = trimesh.load(str(target_mesh_path), force="mesh", process=False)
+    offsets_np = np.load(str(offsets_path))        # (N, 3) float32
+
+    n_verts   = offsets_np.shape[0]
+    faces_np  = mesh_a.faces
+
+    # ── Step 1: Sparse Laplacian smoothing of the offset field ──────
+    # Build adjacency from face list, then construct the blend matrix
+    # ((1-λ)I + λL) and apply it n_iters times.
+    adjacency = defaultdict(set)
+    for f in faces_np:
+        for i in range(3):
+            for j in range(3):
+                if i != j:
+                    adjacency[f[i]].add(f[j])
+
+    n_smooth_iters = 15
+    smooth_lambda  = 0.5
+
+    L = lil_matrix((n_verts, n_verts), dtype=np.float32)
+    for v_idx in range(n_verts):
+        neighbors = list(adjacency[v_idx])
+        n_nb = len(neighbors)
+        if n_nb == 0:
+            L[v_idx, v_idx] = 1.0
+            continue
+        for nb in neighbors:
+            L[v_idx, nb] = 1.0 / n_nb
+        L[v_idx, v_idx] = 0.0
+
+    L = L.tocsr()
+    I = speye(n_verts, format="csr")
+    blend_matrix = (1 - smooth_lambda) * I + smooth_lambda * L
+
+    smoothed_np = offsets_np.copy()
+    for _ in range(n_smooth_iters):
+        smoothed_np = blend_matrix @ smoothed_np
+
+    log.info("[diff_refine] Laplacian smoothing done (%d iters)", n_smooth_iters)
+
+    # ── Step 2: Project deformed vertices onto target surface ────────
+    base_verts_np  = mesh_a.vertices.astype(np.float32)
+    deformed_smoothed_np = base_verts_np + smoothed_np
+
+    closest_points, distances, _ = trimesh.proximity.closest_point(
+        mesh_b, deformed_smoothed_np
+    )
+    log.info(
+        "[diff_refine] projection: median dist=%.5f  max dist=%.5f",
+        float(np.median(distances)), float(distances.max()),
+    )
+
+    # ── Step 3: Selective blend ──────────────────────────────────────
+    # Vertices within 2× median distance trust the projected position.
+    # Vertices farther away (topology mismatch) keep the smoothed position.
+    median_dist     = float(np.median(distances))
+    blend_threshold = median_dist * 2.0
+
+    blend_weight = np.clip(
+        1.0 - (distances / (blend_threshold + 1e-8)), 0.0, 1.0
+    )[:, None]  # (N, 1)
+
+    refined_positions = (
+        blend_weight       * closest_points
+        + (1 - blend_weight) * deformed_smoothed_np
+    )
+    refined_offsets_np = (refined_positions - base_verts_np).astype(np.float32)
+
+    n_projected = int((blend_weight.squeeze() > 0.5).sum())
+    log.info(
+        "[diff_refine] %d/%d verts snapped to target, %d kept from smoothing",
+        n_projected, n_verts, n_verts - n_projected,
+    )
+
+    # ── Save refined mesh and offsets for inspection + Phase 2 ──────
+    refined_offsets_out = session.dir / "diff_offsets_refined.npy"
+    np.save(str(refined_offsets_out), refined_offsets_np)
+
+    refined_mesh = trimesh.Trimesh(
+        vertices=refined_positions.astype(np.float32),
+        faces=faces_np,
+        process=False,
+    )
+    refined_mesh.fix_normals()
+    refined_mesh_out = session.dir / "diff_deformed_refined.glb"
+    refined_mesh.export(str(refined_mesh_out))
+
+    log.info(
+        "[diff_refine] Phase 1.5 complete. Saved diff_deformed_refined.glb "
+        "and diff_offsets_refined.npy"
+    )
+
+    return {
+        "diff_offsets_path":    str(refined_offsets_out),
+        "diff_refined_mesh_path": str(refined_mesh_out),
+    }
+
+
+# ------------------------------------------------------------------
+# Node 7b-3: diff_interpolate — Phase 2: generate animation frames
+# ------------------------------------------------------------------
+
+def diff_interpolate_node(state: MorphingState) -> dict:
+    """
+    Phase 2 of the differential rendering morph.
+
+    Loads the (refined) per-vertex offsets and interpolates from zero to the
+    full offset using a Hermite smoothstep curve, exporting one GLB per frame.
+    The interpolation is done over the offsets (not positions) so frame 0 is
+    always the unmodified base mesh and frame N-1 is the fully deformed target.
+    """
+    import json
+    import torch
+
+    base_mesh_path = state.get("diff_base_mesh_path")
+    offsets_path   = state.get("diff_offsets_path")
+    if not base_mesh_path or not offsets_path:
+        raise RuntimeError(
+            "[diff_interpolate] missing diff_base_mesh_path / diff_offsets_path"
+        )
+
+    cfg     = state["cfg"]
+    session = state["session"]
+    dc      = cfg.diff_rend
+    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    mesh_a     = trimesh.load(str(base_mesh_path), force="mesh", process=False)
+    offsets_np = np.load(str(offsets_path))
+
+    verts_t   = torch.tensor(mesh_a.vertices, dtype=torch.float32, device=device)
+    faces_np  = mesh_a.faces
+    offsets_t = torch.tensor(offsets_np, dtype=torch.float32, device=device)
 
     out_dir = session.dir / "transition"
     out_dir.mkdir(exist_ok=True)
-    frame_paths = []
+    frame_paths: list[str] = []
 
-    log.info("[morph_diff] Phase 2: generating %d morph frames", dc.n_frames)
+    log.info("[diff_interpolate] Phase 2: generating %d morph frames", dc.n_frames)
 
     for i in range(dc.n_frames):
-        t = i / max(1, dc.n_frames - 1)  # 0 → 1
-
-        # Hermite smoothstep: ease-in-out for natural-looking motion
+        t = i / max(1, dc.n_frames - 1)
+        # Hermite smoothstep: ease-in / ease-out
         t_smooth = t * t * (3.0 - 2.0 * t)
 
-        # Apply interpolated offsets
         with torch.no_grad():
-            interp_offsets = final_offsets * t_smooth
-            deformed = src_mesh.offset_verts(interp_offsets)
+            deformed_verts = (verts_t + offsets_t * t_smooth).cpu().numpy()
 
-            v = deformed.verts_packed().cpu().numpy()
-            f = deformed.faces_packed().cpu().numpy()
-            frame = trimesh.Trimesh(vertices=v, faces=f, process=False)
-            frame.fix_normals()
+        frame = trimesh.Trimesh(
+            vertices=deformed_verts, faces=faces_np, process=False
+        )
+        frame.fix_normals()
+        fname = out_dir / f"frame_{i:04d}.glb"
+        frame.export(str(fname))
+        frame_paths.append(str(fname))
 
-            fname = out_dir / f"frame_{i:04d}.glb"
-            frame.export(str(fname))
-            frame_paths.append(str(fname))
-
-    # ── Summary ──────────────────────────────────────────────────────
     info = {
-        "method": "differential_two_phase",
-        "n_optimization_steps": dc.n_steps,
-        "n_views": len(cameras_RT),
+        "method": "differential_three_phase",
         "n_frames": len(frame_paths),
         "device": str(device),
-        "final_offset_mean": final_offsets.norm(dim=1).mean().item(),
-        "final_offset_max": final_offsets.norm(dim=1).max().item(),
+        "offsets_source": str(offsets_path),
     }
     (out_dir / "morph_info.json").write_text(json.dumps(info, indent=2))
-    log.info(
-        "[morph_diff] done — %d frames in %s", len(frame_paths), out_dir
-    )
+    log.info("[diff_interpolate] done — %d frames in %s", len(frame_paths), out_dir)
 
     return {"transition_path": str(out_dir), "exit_code": 0}

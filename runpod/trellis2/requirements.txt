@@ -1,0 +1,11 @@
+# Gradio server and HuggingFace Hub
+# TRELLIS.2 setup.sh pins gradio==6.0.1
+gradio==6.0.1
+huggingface-hub>=0.23.0
+
+# Background removal — TRELLIS imports rembg at module load time
+rembg>=2.0.56
+onnxruntime>=1.18.0
+
+# Image / mesh handling
+Pillow>=10.0.0

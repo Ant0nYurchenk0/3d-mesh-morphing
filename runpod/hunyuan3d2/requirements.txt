@@ -1,0 +1,7 @@
+# Gradio server — the repo's requirements.txt already covers
+# diffusers, transformers, accelerate, trimesh, numpy, scipy,
+# einops, rembg, Pillow, etc.
+#
+# Only add what's missing for the Gradio API server:
+gradio>=4.36.0
+huggingface-hub>=0.23.0

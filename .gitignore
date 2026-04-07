@@ -228,3 +228,5 @@ __pycache__/
 sessions/
 cache/
 uv.lock
+
+.claude/*

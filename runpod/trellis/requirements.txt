@@ -1,0 +1,25 @@
+# Gradio server and HuggingFace Hub
+gradio>=4.36.0
+huggingface-hub>=0.23.0
+
+# Version pins required for torch 2.1.x compatibility
+# transformers >=4.47 requires torch >=2.4
+transformers>=4.41.0,<4.47.0
+# diffusers >=0.30 uses torch.xpu which requires torch >=2.4
+diffusers>=0.29.0,<0.30.0
+# numpy 2.x breaks torch 2.1 (compiled against numpy 1.x)
+numpy>=1.26.0,<2.0
+
+# Background removal — TRELLIS imports rembg at module load time
+rembg>=2.0.56
+onnxruntime>=1.18.0
+
+# Image / mesh handling
+Pillow>=10.0.0
+imageio>=2.33.0
+imageio-ffmpeg>=0.4.9
+trimesh>=4.4.0
+
+# Numerics
+scipy>=1.12.0
+einops>=0.7.0

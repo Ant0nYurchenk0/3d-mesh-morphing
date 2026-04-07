@@ -28,8 +28,16 @@ Graph topology:
                              │
               ┌──────────────┴──────────────┐
               ▼                             ▼
-  [morph_meshes_sdf]          [morph_meshes_differential]
-  (7a) SDF interpolation      (7b) differential rendering (placeholder)
+  [morph_meshes_sdf]              [diff_optimize]
+  (7a) SDF interpolation          (7b-1) Phase 1: optimize offsets
+              │                             │
+              │                             ▼
+              │                     [diff_refine]
+              │                     (7b-2) Phase 1.5: smooth + project
+              │                             │
+              │                             ▼
+              │                   [diff_interpolate]
+              │                   (7b-3) Phase 2: export frames
               │                             │
               └──────────────┬──────────────┘
                              ▼
@@ -47,10 +55,12 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from .nodes import (
+    diff_interpolate_node,
+    diff_optimize_node,
+    diff_refine_node,
     enhance_image_node,
     image_to_base_mesh_node,
     morph_image_node,
-    morph_meshes_differential_node,
     morph_meshes_sdf_node,
     render_mesh_node,
     repair_mesh_node,
@@ -71,7 +81,7 @@ def _route_morph_method(state: MorphingState) -> str:
     """Route to the requested morphing node."""
     method = state.get("morph_method", "sdf")
     if method == "differential":
-        return "morph_meshes_differential"
+        return "diff_optimize"
     return "morph_meshes_sdf"
 
 
@@ -87,7 +97,9 @@ def build_graph():
     graph.add_node("target_mesh", target_mesh_node)
     graph.add_node("repair_mesh", repair_mesh_node)
     graph.add_node("morph_meshes_sdf", morph_meshes_sdf_node)
-    graph.add_node("morph_meshes_differential", morph_meshes_differential_node)
+    graph.add_node("diff_optimize", diff_optimize_node)
+    graph.add_node("diff_refine", diff_refine_node)
+    graph.add_node("diff_interpolate", diff_interpolate_node)
 
     graph.set_entry_point("setup")
 
@@ -115,11 +127,13 @@ def build_graph():
         _route_morph_method,
         {
             "morph_meshes_sdf": "morph_meshes_sdf",
-            "morph_meshes_differential": "morph_meshes_differential",
+            "diff_optimize": "diff_optimize",
         },
     )
 
     graph.add_edge("morph_meshes_sdf", END)
-    graph.add_edge("morph_meshes_differential", END)
+    graph.add_edge("diff_optimize", "diff_refine")
+    graph.add_edge("diff_refine", "diff_interpolate")
+    graph.add_edge("diff_interpolate", END)
 
     return graph.compile()

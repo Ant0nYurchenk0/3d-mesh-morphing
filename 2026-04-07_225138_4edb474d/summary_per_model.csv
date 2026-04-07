@@ -1,0 +1,4 @@
+model,n_shapes,mean_chamfer_distance,mean_f_score,mean_hausdorff_distance,mean_volume_iou,mean_normal_consistency,mean_morphing_readiness_score,mean_dino_similarity,mean_cleanup_cost
+hunyuan3d,4,0.20080250,0.17513600,0.67442497,0.14576600,0.50232500,0.55903100,0.78617150,5.0
+trellis,4,0.19483956,0.06558525,0.67062523,,0.51048475,0.51981200,0.76911650,3.8
+trellis2,4,0.19641226,0.08222550,0.66133876,,0.50252100,0.51742325,0.78014700,4.8

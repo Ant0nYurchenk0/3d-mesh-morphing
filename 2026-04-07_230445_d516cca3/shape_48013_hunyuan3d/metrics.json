@@ -1,0 +1,20 @@
+{
+  "chamfer_distance": 0.11250452,
+  "f_score": 0.11602,
+  "hausdorff_distance": 0.65334042,
+  "volume_iou": null,
+  "normal_consistency": 0.577484,
+  "morphing_readiness_score": 0.373245,
+  "dino_similarity": 0.661624,
+  "cleanup_cost": 6,
+  "metadata": {
+    "is_watertight_gt": true,
+    "is_watertight_pred": false,
+    "n_vertices_pred": 102205,
+    "n_faces_pred": 204406,
+    "n_vertices_gt": 14955,
+    "n_faces_gt": 29890,
+    "euler_number_pred": 7,
+    "euler_number_gt": 10
+  }
+}

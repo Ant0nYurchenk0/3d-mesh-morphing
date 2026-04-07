@@ -92,7 +92,7 @@ models:
     # Community fork of microsoft/TRELLIS-image-large — exposes /start_session
     # to work around the session-directory bug in the original microsoft/TRELLIS.
     space_id: "trellis-community/TRELLIS"
-    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
+    endpoint_url: "https://vvrayt2lr27all-7860.proxy.runpod.net"
     api_name: "/generate_and_extract_glb"   # combined generate+extract endpoint
     output_format: glb
     seed: 42
@@ -105,7 +105,7 @@ models:
 
   trellis2:
     space_id: "microsoft/TRELLIS.2"
-    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
+    endpoint_url: "https://l9y1s0xxb1rr3w-7860.proxy.runpod.net"
     api_name: "/image_to_3d"      # step 1 of 2; step 2 is /extract_glb (same session)
     output_format: glb
     seed: 42
@@ -128,7 +128,7 @@ models:
 
   hunyuan3d:
     space_id: "tencent/Hunyuan3D-2"
-    endpoint_url: ""        # set to RunPod URL to bypass HF Space (see RUNPOD.md)
+    endpoint_url: "https://olvuns2ofbhjb7-7860.proxy.runpod.net"
     api_name: "/shape_generation"   # verified; NOT /generate
     output_format: glb
     steps: 30

@@ -230,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         "repaired_mesh_path": None,
         "repair_report": None,
         "transition_path": None,
+        "diff_base_mesh_path": None,
+        "diff_target_mesh_path": None,
+        "diff_offsets_path": None,
+        "diff_deformed_mesh_path": None,
+        "diff_refined_mesh_path": None,
         "exit_code": 0,
     }
 
